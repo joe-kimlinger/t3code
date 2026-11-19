@@ -1672,6 +1672,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ),
       );
 
+  // A thread joining a worktree works on the linked worktrees its owner made beside it.
+  const inheritedLinkedWorktrees = Effect.fn("orchestrationV2.inheritedLinkedWorktrees")(function* (
+    worktreePath: string,
+  ) {
+    const snapshot = yield* Effect.flatten(projectionStore.readShellSnapshot({ worktreePath }));
+    return [...snapshot.threads, ...snapshot.archivedThreads].find(
+      (candidate) => (candidate.linkedWorktrees?.length ?? 0) > 0,
+    )?.linkedWorktrees;
+  });
+
   const mapDelegatedCompletionError = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
       Effect.mapError(
@@ -4007,6 +4017,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
 
+    const linkedWorktrees =
+      command.worktreePath === null
+        ? undefined
+        : yield* inheritedLinkedWorktrees(command.worktreePath).pipe(mapDispatchError(command));
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
     const thread: OrchestrationV2AppThread = {
@@ -4021,6 +4035,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       interactionMode: command.interactionMode,
       branch: command.branch,
       worktreePath: command.worktreePath,
+      ...(linkedWorktrees === undefined ? {} : { linkedWorktrees }),
       activeProviderThreadId: null,
       pullRequests: [],
       ...(command.linkOrigin === undefined ? {} : { linkOrigin: command.linkOrigin }),
@@ -15557,7 +15572,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.metadata.update": {
         const continuation = metadataUpdateContinuation(command);
         if (continuation !== undefined) yield* refuseNativeSubagentMessage(command);
-        yield* dispatchThreadMutation(command, events, effects);
+        const inherited =
+          command.linkedWorktrees === undefined && typeof command.worktreePath === "string"
+            ? yield* inheritedLinkedWorktrees(command.worktreePath).pipe(mapDispatchError(command))
+            : undefined;
+        yield* dispatchThreadMutation(
+          inherited === undefined ? command : { ...command, linkedWorktrees: inherited },
+          events,
+          effects,
+        );
         if (continuation !== undefined) {
           cancelUnsettledEffects = yield* dispatchMessage(continuation, events, effects);
           yield* recordSubagentFollowup(continuation, events).pipe(mapDispatchError(command));

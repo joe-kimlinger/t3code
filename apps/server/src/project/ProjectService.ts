@@ -17,6 +17,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
@@ -40,6 +41,7 @@ import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
 import { makeIsWorktreeContainer } from "./worktreeContainer.ts";
+import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 
 export interface ProjectCreateInput extends ProjectCreatePayload {
@@ -186,6 +188,7 @@ export const make = Effect.gen(function* () {
   const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
   const isWorktreeContainer = yield* makeIsWorktreeContainer.pipe(
     Effect.provide(ProcessRunner.layer),
@@ -304,6 +307,15 @@ export const make = Effect.gen(function* () {
       }
       if (resolved.includes(normalized)) {
         return yield* invalid(`${normalized} is linked more than once.`);
+      }
+      // A folder inside another would be reached twice and get no worktree of its own.
+      const overlapping = [workspaceRoot, ...resolved].find(
+        (other) => isWithinRoot(path, normalized, other) || isWithinRoot(path, other, normalized),
+      );
+      if (overlapping !== undefined) {
+        return yield* invalid(
+          `${normalized} overlaps ${overlapping}. Link folders that sit outside each other.`,
+        );
       }
       if (yield* isManagedWorktreePath(normalized)) {
         return yield* invalid(
@@ -502,11 +514,14 @@ export const make = Effect.gen(function* () {
       if (
         additionalRoots === undefined &&
         workspaceRoot !== previousRoot &&
-        existing.value.additionalRoots.includes(workspaceRoot)
+        existing.value.additionalRoots.some(
+          (root) =>
+            isWithinRoot(path, workspaceRoot, root) || isWithinRoot(path, root, workspaceRoot),
+        )
       ) {
         return yield* new ProjectInvalidError({
           projectId: input.projectId,
-          detail: `${workspaceRoot} is already linked to this project. Unlink it before making it the main folder.`,
+          detail: `${workspaceRoot} overlaps a folder linked to this project. Unlink it before making this the main folder.`,
         });
       }
       yield* commit({

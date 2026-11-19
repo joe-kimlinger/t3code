@@ -823,13 +823,22 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
         ? runtimeModeDefaults.approvalPolicy
         : yield* decodeTurnApprovalPolicy(input.runtimePolicy.approvalPolicy);
     const linkedFolders = input.runtimePolicy.additionalDirectories ?? [];
-    const defaultSandboxPolicy = runtimeModeDefaults.sandboxPolicy;
+    const baseSandboxPolicy =
+      input.runtimePolicy.sandboxPolicy === undefined
+        ? runtimeModeDefaults.sandboxPolicy
+        : yield* decodeTurnSandboxPolicy(input.runtimePolicy.sandboxPolicy);
     const sandboxPolicy =
-      input.runtimePolicy.sandboxPolicy !== undefined
-        ? yield* decodeTurnSandboxPolicy(input.runtimePolicy.sandboxPolicy)
-        : defaultSandboxPolicy.type === "workspaceWrite" && linkedFolders.length > 0
-          ? { ...defaultSandboxPolicy, writableRoots: linkedFolders.map((folder) => folder.path) }
-          : defaultSandboxPolicy;
+      baseSandboxPolicy?.type === "workspaceWrite" && linkedFolders.length > 0
+        ? {
+            ...baseSandboxPolicy,
+            writableRoots: [
+              ...new Set([
+                ...(baseSandboxPolicy.writableRoots ?? []),
+                ...linkedFolders.map((folder) => folder.path),
+              ]),
+            ],
+          }
+        : baseSandboxPolicy;
     const selectedEffort =
       getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort") ??
       codexDefaultReasoningEffortOverride(input.modelSelection.model);

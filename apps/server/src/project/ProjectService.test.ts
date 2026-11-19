@@ -381,6 +381,9 @@ it.layer(layerTest)("ProjectService", (it) => {
           );
       yield* reject("primary", ["/work/app/"], "already the project's main folder");
       yield* reject("duplicate", ["/work/api", "/work/api/"], "linked more than once");
+      yield* reject("inside main", ["/work/app/packages/api"], "overlaps /work/app");
+      yield* reject("around main", ["/work"], "overlaps /work/app");
+      yield* reject("nested linked", ["/work/api", "/work/api/src"], "overlaps /work/api");
       yield* reject("missing", ["/work/missing"], "is not a folder on this environment");
       yield* reject(
         "worktree",
@@ -394,7 +397,7 @@ it.layer(layerTest)("ProjectService", (it) => {
           workspaceRoot: "/work/api",
         })
         .pipe(Effect.flip);
-      assert.include(moved.message, "Unlink it before making it the main folder");
+      assert.include(moved.message, "overlaps a folder linked to this project");
       assert.deepEqual(Option.getOrThrow(yield* service.getById(projectId)).additionalRoots, [
         "/work/api",
       ]);
