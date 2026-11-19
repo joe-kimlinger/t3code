@@ -97,6 +97,72 @@ it.layer(ProjectStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemor
       }),
     );
 
+    it.effect("keeps linked folders until an update replaces them", () =>
+      Effect.gen(function* () {
+        const projects = yield* ProjectStore.ProjectStoreV2;
+        const sql = yield* SqlClient.SqlClient;
+        const projectId = ProjectId.make("project-linked");
+        const at = "2026-03-24T00:00:00.000Z";
+        const event = { aggregateKind: "project", aggregateId: projectId, occurredAt: at } as const;
+        const meta = { commandId: null, causationEventId: null, correlationId: null, metadata: {} };
+        yield* projects.apply({
+          ...event,
+          ...meta,
+          sequence: 1,
+          eventId: EventId.make("event-linked-created"),
+          type: "project.created",
+          payload: {
+            projectId,
+            title: "Linked",
+            workspaceRoot: "/tmp/app",
+            additionalRoots: ["/tmp/api"],
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: at,
+            updatedAt: at,
+          },
+        });
+        yield* projects.apply({
+          ...event,
+          ...meta,
+          sequence: 2,
+          eventId: EventId.make("event-linked-renamed"),
+          type: "project.meta-updated",
+          payload: { projectId, title: "Renamed", updatedAt: at },
+        });
+        assert.deepStrictEqual(
+          Option.getOrNull(yield* projects.getShell(projectId))?.additionalRoots,
+          ["/tmp/api"],
+        );
+        yield* projects.apply({
+          ...event,
+          ...meta,
+          sequence: 3,
+          eventId: EventId.make("event-linked-replaced"),
+          type: "project.meta-updated",
+          payload: { projectId, additionalRoots: ["/tmp/web", "/tmp/docs"], updatedAt: at },
+        });
+        assert.deepStrictEqual(Option.getOrNull(yield* projects.get(projectId))?.additionalRoots, [
+          "/tmp/web",
+          "/tmp/docs",
+        ]);
+        yield* projects.apply({
+          ...event,
+          ...meta,
+          sequence: 4,
+          eventId: EventId.make("event-linked-cleared"),
+          type: "project.meta-updated",
+          payload: { projectId, additionalRoots: [], updatedAt: at },
+        });
+        const rows = yield* sql<{ readonly additionalRoots: string }>`
+          SELECT additional_roots_json AS "additionalRoots"
+          FROM projection_projects
+          WHERE project_id = ${projectId}
+        `;
+        assert.strictEqual(rows[0]?.additionalRoots, "[]");
+      }),
+    );
+
     it.effect("marks a project's title as custom only once it is renamed", () =>
       Effect.gen(function* () {
         const projects = yield* ProjectStore.ProjectStoreV2;

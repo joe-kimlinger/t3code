@@ -21,6 +21,7 @@ import {
   type ScheduledTaskId,
   TextGenerationError,
   ThreadId,
+  type ThreadLinkedWorktree,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -30,8 +31,10 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
@@ -282,6 +285,8 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const eventSink = yield* EventSink.EventSinkV2;
   const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   // A project-folder launch that names no branch records the folder's checkout, as the composer does.
   const launchBranch = (strategy: ThreadLaunchWorkspaceStrategy, workspaceRoot: string) =>
     strategy.type === "root" && strategy.branch === undefined
@@ -526,6 +531,89 @@ const make = Effect.gen(function* () {
       : null;
   });
 
+  /**
+   * A worktree on the thread's branch in one linked git repository, based on its default branch.
+   * A plain folder, or a repository that refuses one, is used as it is, so this never fails a launch.
+   */
+  const createLinkedWorktree = Effect.fn("ThreadLaunchService.createLinkedWorktree")(
+    function* (root: string, branch: string) {
+      const skipped = (reason: string) => ({ _tag: "skipped" as const, reason });
+      const repositoryRoot = yield* git.repositoryRoot(root).pipe(Effect.orElseSucceed(() => null));
+      // A plain folder is meant to be shared as it is.
+      if (repositoryRoot === null) return null;
+      const realRoot = yield* fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root));
+      if (path.resolve(repositoryRoot) !== realRoot && path.resolve(repositoryRoot) !== root) {
+        return skipped(
+          `it is inside the repository ${repositoryRoot}; link that repository to get a worktree`,
+        );
+      }
+      if ((yield* git.listLocalBranchNames(root)).includes(branch)) {
+        const existing = yield* git.createWorktree({ cwd: root, refName: branch, path: null });
+        return {
+          _tag: "created" as const,
+          linked: { root, worktreePath: existing.worktree.path, branch },
+          createdBranch: false,
+        };
+      }
+      const remoteName = yield* git
+        .resolvePrimaryRemoteName(root)
+        .pipe(Effect.orElseSucceed(() => null));
+      const base = yield* worktreeFallbackBase(root, remoteName);
+      if (base === null) return skipped("the repository has no commit to start a branch from");
+      const created = yield* git.createWorktree({
+        cwd: root,
+        refName: base.startRef,
+        newRefName: branch,
+        baseRefName: base.baseRefName,
+        path: null,
+      });
+      return {
+        _tag: "created" as const,
+        linked: { root, worktreePath: created.worktree.path, branch: created.worktree.refName },
+        createdBranch: true,
+      };
+    },
+    (effect, root) =>
+      effect.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Linked folder worktree was not created; using the folder", {
+            root,
+            cause,
+          }).pipe(
+            Effect.as({
+              _tag: "skipped" as const,
+              reason: String(Cause.squash(cause)),
+            }),
+          ),
+        ),
+      ),
+  );
+
+  const removeLinkedWorktrees = (
+    worktrees: ReadonlyArray<{
+      readonly linked: ThreadLinkedWorktree;
+      readonly createdBranch: boolean;
+    }>,
+  ) =>
+    Effect.forEach(
+      worktrees,
+      ({ linked, createdBranch }) =>
+        git.removeWorktree({ cwd: linked.root, path: linked.worktreePath, force: true }).pipe(
+          Effect.andThen(
+            createdBranch
+              ? git.deleteLocalBranch({ cwd: linked.root, refName: linked.branch, force: true })
+              : Effect.void,
+          ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Failed to remove an abandoned linked worktree", {
+              path: linked.worktreePath,
+              cause,
+            }),
+          ),
+        ),
+      { discard: true },
+    );
+
   const prepareInBackground = Effect.fn("ThreadLaunchService.prepareInBackground")(function* (
     input: PreparationInput,
     threadId: ThreadId,
@@ -546,6 +634,10 @@ const make = Effect.gen(function* () {
     const tracked = input.workspaceStrategy.type === "worktree" || reused !== undefined;
     let createdWorktreePath: string | null = null;
     let createdBranch: string | null = null;
+    const createdLinkedWorktrees: Array<{
+      readonly linked: ThreadLinkedWorktree;
+      readonly createdBranch: boolean;
+    }> = [];
     let setupTerminalId: string | null = null;
     let workspaceRecorded = false;
     let runReleased = false;
@@ -822,6 +914,22 @@ const make = Effect.gen(function* () {
           ),
         }));
         yield* setupTracker.stageStatus(threadId, "checkout", "done");
+        const linkedWarnings: Array<string> = [];
+        for (const root of project.additionalRoots ?? []) {
+          const linked = yield* createLinkedWorktree(root, branch);
+          if (linked?._tag === "created") createdLinkedWorktrees.push(linked);
+          else if (linked?._tag === "skipped") {
+            linkedWarnings.push(`${path.basename(root)} uses the folder itself: ${linked.reason}`);
+          }
+        }
+        if (linkedWarnings.length > 0) {
+          yield* setupTracker.stageStatus(
+            threadId,
+            "checkout",
+            "warning",
+            linkedWarnings.join("; "),
+          );
+        }
       }
 
       // Do not rewrite reused worktrees; that could undo the original branch rename.
@@ -833,6 +941,9 @@ const make = Effect.gen(function* () {
             threadId,
             branch,
             worktreePath,
+            ...(createdLinkedWorktrees.length === 0
+              ? {}
+              : { linkedWorktrees: createdLinkedWorktrees.map(({ linked }) => linked) }),
           })
           .pipe(Effect.mapError(mapError(input, "update-thread", threadId)));
       }
@@ -868,6 +979,36 @@ const make = Effect.gen(function* () {
           ),
           Effect.flatMap((renamed) =>
             Effect.gen(function* () {
+              // Linked repositories follow the rename on the branches this launch made. Each entry
+              // updates as its rename lands, so a cancel deletes the branch under its new name.
+              for (const [index, entry] of createdLinkedWorktrees.entries()) {
+                if (!entry.createdBranch || entry.linked.branch !== oldBranch) continue;
+                yield* git
+                  .renameBranch({
+                    cwd: entry.linked.worktreePath,
+                    oldBranch,
+                    newBranch: renamed.branch,
+                    exactName: true,
+                  })
+                  .pipe(
+                    Effect.tap((linkedRename) =>
+                      Effect.sync(() => {
+                        createdLinkedWorktrees[index] = {
+                          ...entry,
+                          linked: { ...entry.linked, branch: linkedRename.branch },
+                        };
+                      }),
+                    ),
+                    Effect.catchCause((cause) =>
+                      Effect.logWarning("Linked worktree branch rename failed", {
+                        threadId,
+                        path: entry.linked.worktreePath,
+                        cause,
+                      }),
+                    ),
+                    Effect.uninterruptible,
+                  );
+              }
               yield* threads
                 .dispatch({
                   type: "thread.metadata.update",
@@ -875,6 +1016,9 @@ const make = Effect.gen(function* () {
                   threadId,
                   branch: renamed.branch,
                   worktreePath: worktreeCwd,
+                  ...(createdLinkedWorktrees.length === 0
+                    ? {}
+                    : { linkedWorktrees: createdLinkedWorktrees.map(({ linked }) => linked) }),
                   expectedBranch: oldBranch,
                   expectedWorktreePath: worktreeCwd,
                 })
@@ -1066,6 +1210,7 @@ const make = Effect.gen(function* () {
             ((cancelled && !runReleased) || !workspaceRecorded)
           ) {
             if (branchRename !== null) yield* Fiber.interrupt(branchRename);
+            yield* removeLinkedWorktrees(createdLinkedWorktrees);
             const removedPath = createdWorktreePath;
             const removedBranch = createdBranch;
             // Forget worktrees only after removal succeeds; failed removals must not reuse partially written checkouts.

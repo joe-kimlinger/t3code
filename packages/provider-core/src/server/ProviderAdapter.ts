@@ -49,6 +49,10 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   cwd: Schema.NullOr(Schema.String),
+  /** The project's linked folders, as this thread works on them; agents get access beside `cwd`. */
+  additionalDirectories: Schema.optional(
+    Schema.Array(Schema.Struct({ path: Schema.String, name: Schema.String })),
+  ),
   approvalPolicy: Schema.optional(Schema.Unknown),
   sandboxPolicy: Schema.optional(Schema.Unknown),
   /**

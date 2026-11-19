@@ -744,6 +744,65 @@ const checkpointCleanupFixture = Effect.fn("test.checkpointCleanupFixture")(func
   return { ...fixture, sql, addThread, listRefs };
 });
 
+it.live(
+  "removes a deleted thread's linked worktrees with its own, once no live thread uses it",
+  () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const fixture = yield* cleanupFixture(DEFAULT_SERVER_SETTINGS.storageCleanup, sql);
+        const { fs, command, service, worktree } = fixture;
+        const linkedRepo = yield* fs.realPath(
+          yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-linked-delete-" }),
+        );
+        yield* command(linkedRepo, ["init", "-b", "main"]);
+        yield* command(linkedRepo, [
+          "-c",
+          "user.name=Cleanup test",
+          "-c",
+          "user.email=cleanup@example.test",
+          "commit",
+          "--allow-empty",
+          "-m",
+          "initial",
+        ]);
+        const linked = `${fixture.config.worktreesDir}/api-feature`;
+        yield* command(linkedRepo, ["worktree", "add", "-b", "feature", linked]);
+        yield* fs.writeFileString(`${linked}/notes.txt`, "agent work\n");
+        const timestamp = DateTime.formatIso(at(0));
+        const addThread = (id: string, deleted: boolean) =>
+          sql`INSERT INTO orchestration_v2_projection_threads ${sql.insert({
+            thread_id: id,
+            project_id: "project-1",
+            title: id,
+            default_provider: "codex",
+            runtime_mode: "full-access",
+            interaction_mode: "default",
+            created_at: timestamp,
+            updated_at: timestamp,
+            archived_at: null,
+            deleted_at: deleted ? timestamp : null,
+            payload_json: JSON.stringify({
+              worktreePath: worktree,
+              linkedWorktrees: [{ root: linkedRepo, worktreePath: linked, branch: "feature" }],
+            }),
+          })}`;
+        yield* addThread("deleted-owner", true);
+        yield* addThread("live-sharer", false);
+        yield* service.removeLinkedWorktreesBeside(worktree);
+        expect(yield* fs.exists(linked)).toBe(true);
+
+        yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = ${timestamp}`;
+        yield* service.removeLinkedWorktreesBeside(worktree);
+        // Deleting a thread's worktree discards it like the thread's own; the branch stays.
+        expect(yield* fs.exists(linked)).toBe(false);
+        expect((yield* command(linkedRepo, ["branch", "--list", "feature"])).stdout).toContain(
+          "feature",
+        );
+      }).pipe(Effect.provide(Sqlite.layerMemory)),
+    ),
+);
+
 describe("checkpoint ref cleanup", () => {
   it.live("prunes refs owned by deleted threads after their worktree is removed", () =>
     runCleanupTest(
@@ -1683,6 +1742,51 @@ describe("deleted thread worktrees", () => {
         reason: "Inactive for 30 days",
       });
       expect(yield* fixture.fs.exists(fixture.worktree)).toBe(false);
+    }).pipe(Effect.provide(cleanupTestLayer)),
+  );
+
+  it.effect("removes a thread's clean linked worktrees with its own, keeping their branches", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(NOW_MS);
+      const fixture = yield* cleanupFixture();
+      const { fs, command } = fixture;
+      const linkedRepo = yield* fs.realPath(
+        yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-linked-" }),
+      );
+      yield* command(linkedRepo, ["init", "-b", "main"]);
+      yield* command(linkedRepo, [
+        "-c",
+        "user.name=Cleanup test",
+        "-c",
+        "user.email=cleanup@example.test",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "initial",
+      ]);
+      const clean = `${fixture.config.worktreesDir}/api-clean`;
+      const edited = `${fixture.config.worktreesDir}/api-edited`;
+      yield* command(linkedRepo, ["worktree", "add", "-b", "feature", clean]);
+      yield* command(linkedRepo, ["worktree", "add", "-b", "other", edited]);
+      yield* fs.writeFileString(`${edited}/notes.txt`, "unsaved work\n");
+      fixture.setThreads([
+        shell({
+          branch: "feature",
+          worktreePath: fixture.worktree,
+          linkedWorktrees: [
+            { root: linkedRepo, worktreePath: clean, branch: "feature" },
+            { root: linkedRepo, worktreePath: edited, branch: "other" },
+          ],
+        }),
+      ]);
+      const report = yield* fixture.service.runNow;
+      expect(report.entries[0]).toMatchObject({ outcome: "removed" });
+      expect(yield* fs.exists(fixture.worktree)).toBe(false);
+      expect(yield* fs.exists(clean)).toBe(false);
+      expect(yield* fs.readFileString(`${edited}/notes.txt`)).toBe("unsaved work\n");
+      expect((yield* command(linkedRepo, ["branch", "--list", "feature"])).stdout).toContain(
+        "feature",
+      );
     }).pipe(Effect.provide(cleanupTestLayer)),
   );
 

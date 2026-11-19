@@ -239,6 +239,51 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
+  it.effect("lets Codex write in linked folders and tells it about them", () =>
+    Effect.gen(function* () {
+      const build = (runtimeMode: "approval-required" | "auto" | "full-access") =>
+        CodexAdapterV2.buildCodexTurnStartParams({
+          nativeThreadId: `native-linked-${runtimeMode}`,
+          codexInput: [{ type: "text", text: "test" }],
+          runtimePolicy: {
+            runtimeMode,
+            interactionMode: "default",
+            cwd: "/work/app",
+            additionalDirectories: [{ path: "/work/api", name: "api" }],
+          },
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        });
+      const auto = yield* build("auto");
+      assert.deepEqual(auto.sandboxPolicy, {
+        type: "workspaceWrite",
+        writableRoots: ["/work/api"],
+      });
+      assert.include(
+        auto.additionalContext?.t3_code_linked_folders?.value ?? "",
+        "- api: /work/api",
+      );
+      const overridden = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-linked-override",
+        codexInput: [{ type: "text", text: "test" }],
+        runtimePolicy: {
+          runtimeMode: "auto",
+          interactionMode: "default",
+          cwd: "/work/app",
+          additionalDirectories: [{ path: "/work/api", name: "api" }],
+          sandboxPolicy: { type: "workspaceWrite", writableRoots: ["/work/cache"] },
+        },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      });
+      assert.deepEqual(overridden.sandboxPolicy, {
+        type: "workspaceWrite",
+        writableRoots: ["/work/cache", "/work/api"],
+      });
+      // Read-only and full access already reach every folder.
+      assert.deepEqual((yield* build("approval-required")).sandboxPolicy, { type: "readOnly" });
+      assert.deepEqual((yield* build("full-access")).sandboxPolicy, { type: "dangerFullAccess" });
+    }),
+  );
+
   it.effect("sends the chosen cyber access program, else the model's default", () =>
     Effect.gen(function* () {
       const build = (value?: string, cyberAccess?: { defaultProgram: string | undefined }) =>

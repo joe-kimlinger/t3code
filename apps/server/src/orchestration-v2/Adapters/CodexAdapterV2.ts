@@ -111,6 +111,7 @@ import * as PortScanner from "../../preview/PortScanner.ts";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { linkedFoldersInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import { buildCodexAdditionalContext } from "../../provider/CodexDeveloperInstructions.ts";
 import {
   describeMcpElicitation,
@@ -821,10 +822,23 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
       input.runtimePolicy.approvalPolicy === undefined
         ? runtimeModeDefaults.approvalPolicy
         : yield* decodeTurnApprovalPolicy(input.runtimePolicy.approvalPolicy);
-    const sandboxPolicy =
+    const linkedFolders = input.runtimePolicy.additionalDirectories ?? [];
+    const baseSandboxPolicy =
       input.runtimePolicy.sandboxPolicy === undefined
         ? runtimeModeDefaults.sandboxPolicy
         : yield* decodeTurnSandboxPolicy(input.runtimePolicy.sandboxPolicy);
+    const sandboxPolicy =
+      baseSandboxPolicy?.type === "workspaceWrite" && linkedFolders.length > 0
+        ? {
+            ...baseSandboxPolicy,
+            writableRoots: [
+              ...new Set([
+                ...(baseSandboxPolicy.writableRoots ?? []),
+                ...linkedFolders.map((folder) => folder.path),
+              ]),
+            ],
+          }
+        : baseSandboxPolicy;
     const selectedEffort =
       getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort") ??
       codexDefaultReasoningEffortOverride(input.modelSelection.model);
@@ -859,10 +873,21 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
             },
           )
         : undefined;
-    const additionalContext =
-      t3Context === undefined && Object.keys(appContext).length === 0
+    const linkedFoldersContext =
+      linkedFolders.length === 0
         ? undefined
-        : { ...t3Context, ...appContext };
+        : {
+            t3_code_linked_folders: {
+              kind: "application" as const,
+              value: linkedFoldersInstructions(linkedFolders),
+            },
+          };
+    const additionalContext =
+      t3Context === undefined &&
+      linkedFoldersContext === undefined &&
+      Object.keys(appContext).length === 0
+        ? undefined
+        : { ...t3Context, ...linkedFoldersContext, ...appContext };
     return yield* decodeCodexTurnStartParams({
       threadId: input.nativeThreadId,
       input: input.codexInput,

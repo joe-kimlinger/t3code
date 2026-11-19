@@ -3399,6 +3399,7 @@
   "82c158f932fbb0db": "Wähle mit dem Filter oben ein Projekt, um Name, Checkouts und Entfernen zu verwalten.",
   "fa38c677c3af4f00": "Dieses Projekt hat keinen Checkout in den ausgewählten verbundenen Umgebungen. Ändere den Filter oben.",
   "4614a422f1430cd7": "Name",
+  "eb32bab7c8c3a304": "Verknüpfte Ordner",
   "89c5ab924f851b78": "Checkout entfernen",
   "c165e95dd1b35bfd": "Diese Sitzung kann die Anbieter von {environment} anzeigen, aber ihre Einstellungen nicht ändern.",
   "d94f2f73976440c1": "Anbieter-Anmeldung konnte nicht aktualisiert werden.",

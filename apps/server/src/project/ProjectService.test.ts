@@ -42,7 +42,15 @@ import * as RepositoryIdentityResolver from "./RepositoryIdentityResolver.ts";
 import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
 
 const layerWorkspacePaths = Layer.succeed(WorkspacePaths.WorkspacePaths, {
-  normalizeWorkspaceRoot: (workspaceRoot) => Effect.succeed(workspaceRoot.replace(/\/$/, "")),
+  normalizeWorkspaceRoot: (workspaceRoot) =>
+    workspaceRoot.includes("/missing")
+      ? Effect.fail(
+          new WorkspacePaths.WorkspaceRootNotExistsError({
+            workspaceRoot,
+            normalizedWorkspaceRoot: workspaceRoot,
+          }),
+        )
+      : Effect.succeed(workspaceRoot.replace(/\/$/, "")),
   resolveRelativePathWithinRoot: ({ workspaceRoot, relativePath }) =>
     Effect.succeed({ absolutePath: `${workspaceRoot}/${relativePath}`, relativePath }),
 });
@@ -107,7 +115,7 @@ const layerTestFor = (
     Layer.provideMerge(projectMetadataLayer),
     Layer.provideMerge(SqlitePersistence.layerMemory),
     Layer.provideMerge(ServerSettings.layerTest()),
-    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "project-service-test-" })),
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "project-service-test-" })),
     Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     Layer.provideMerge(layerEnrichmentCompletions),
   );
@@ -338,6 +346,80 @@ it.layer(layerTest)("ProjectService", (it) => {
         changes.map((change) => change.event_type),
         ["project.created", "project.meta-updated", "project.meta-updated", "project.deleted"],
       );
+    }),
+  );
+
+  it.effect("validates linked folders and lets an update replace or clear them", () =>
+    Effect.gen(function* () {
+      const service = yield* ProjectService.ProjectService;
+      const config = yield* ServerConfig.ServerConfig;
+      const projectId = ProjectId.make("project:linked");
+      const created = yield* service.create({
+        commandId: CommandId.make("command:linked:create"),
+        projectId,
+        title: "Linked",
+        workspaceRoot: "/work/app",
+        additionalRoots: ["/work/api/"],
+      });
+      assert.deepEqual(created.additionalRoots, ["/work/api"]);
+
+      const reject = (label: string, additionalRoots: ReadonlyArray<string>, expected: string) =>
+        service
+          .update({
+            commandId: CommandId.make(`command:linked:${label}`),
+            projectId,
+            additionalRoots,
+          })
+          .pipe(
+            Effect.flip,
+            Effect.tap((error) =>
+              Effect.sync(() => {
+                assert.equal(error._tag, "ProjectInvalidError", label);
+                assert.include(error.message, expected, label);
+              }),
+            ),
+          );
+      yield* reject("primary", ["/work/app/"], "already the project's main folder");
+      yield* reject("duplicate", ["/work/api", "/work/api/"], "linked more than once");
+      yield* reject("inside main", ["/work/app/packages/api"], "overlaps /work/app");
+      yield* reject("around main", ["/work"], "overlaps /work/app");
+      yield* reject("nested linked", ["/work/api", "/work/api/src"], "overlaps /work/api");
+      yield* reject("missing", ["/work/missing"], "is not a folder on this environment");
+      yield* reject(
+        "worktree",
+        [`${config.worktreesDir}/api/feature`],
+        "Link the repository it belongs to instead",
+      );
+      const moved = yield* service
+        .update({
+          commandId: CommandId.make("command:linked:move-onto-linked"),
+          projectId,
+          workspaceRoot: "/work/api",
+        })
+        .pipe(Effect.flip);
+      assert.include(moved.message, "overlaps a folder linked to this project");
+      assert.deepEqual(Option.getOrThrow(yield* service.getById(projectId)).additionalRoots, [
+        "/work/api",
+      ]);
+
+      const replaced = yield* service.update({
+        commandId: CommandId.make("command:linked:replace"),
+        projectId,
+        additionalRoots: ["/work/web", "/work/docs"],
+      });
+      assert.deepEqual(replaced.additionalRoots, ["/work/web", "/work/docs"]);
+      const renamed = yield* service.update({
+        commandId: CommandId.make("command:linked:rename"),
+        projectId,
+        title: "Still linked",
+      });
+      assert.deepEqual(renamed.additionalRoots, ["/work/web", "/work/docs"]);
+      const cleared = yield* service.update({
+        commandId: CommandId.make("command:linked:clear"),
+        projectId,
+        additionalRoots: [],
+      });
+      assert.deepEqual(cleared.additionalRoots, []);
     }),
   );
 

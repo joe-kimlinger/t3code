@@ -1,4 +1,9 @@
-import { ThreadId, type ProjectId, type TerminalCwdNotFoundError } from "@t3tools/contracts";
+import {
+  ThreadId,
+  type ProjectId,
+  type TerminalCwdNotFoundError,
+  type ThreadLinkedWorktree,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -46,6 +51,7 @@ interface WorktreeThread {
   readonly projectId: ProjectId;
   readonly worktreePath: string | null;
   readonly branch: string | null;
+  readonly linkedWorktrees?: ReadonlyArray<ThreadLinkedWorktree> | undefined;
 }
 
 export const makeRestoreMissingWorktree = Effect.gen(function* () {
@@ -165,7 +171,46 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
     });
   });
 
-  return Effect.fn("restoreMissingWorktree")(function* (thread: WorktreeThread) {
+  // Linked worktrees come back beside the thread's own, from their own repositories; a failure leaves
+  // the agent on the linked folder itself rather than blocking the turn.
+  const restoreLinkedWorktrees = Effect.fn("restoreMissingWorktree.linked")(function* (
+    thread: WorktreeThread,
+  ) {
+    if (thread.worktreePath === null || (thread.linkedWorktrees?.length ?? 0) === 0) return;
+    const project = yield* projects.getById(thread.projectId).pipe(
+      Effect.map(Option.getOrUndefined),
+      Effect.orElseSucceed(() => undefined),
+    );
+    const linkedRoots = project?.additionalRoots ?? [];
+    for (const linked of thread.linkedWorktrees ?? []) {
+      if (!linkedRoots.includes(linked.root)) continue;
+      if (yield* fileSystem.exists(linked.worktreePath).pipe(Effect.orElseSucceed(() => true)))
+        continue;
+      if (!(yield* isManagedWorktreePath(linked.worktreePath))) continue;
+      yield* Effect.logWarning("recreating missing linked worktree", {
+        threadId: thread.id,
+        worktreePath: linked.worktreePath,
+        branch: linked.branch,
+      });
+      yield* recreateMissingWorktree({
+        cwd: linked.root,
+        worktreePath: linked.worktreePath,
+        branch: linked.branch,
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to recreate missing linked worktree", {
+            threadId: thread.id,
+            worktreePath: linked.worktreePath,
+            cause,
+          }),
+        ),
+      );
+    }
+  });
+
+  const restorePrimary = Effect.fn("restoreMissingWorktree.primary")(function* (
+    thread: WorktreeThread,
+  ) {
     const { worktreePath, branch } = thread;
     if (worktreePath === null) return;
     if (branch === null) return yield* recreateScratchFolder(thread, worktreePath);
@@ -201,6 +246,11 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
           : new WorktreeRecreateError({ worktreePath, branch, cause }),
       ),
     );
+  });
+
+  return Effect.fn("restoreMissingWorktree")(function* (thread: WorktreeThread) {
+    yield* restorePrimary(thread);
+    yield* restoreLinkedWorktrees(thread);
   });
 });
 

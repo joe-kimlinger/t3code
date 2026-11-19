@@ -14,6 +14,18 @@ describe("buildRuntimeInstructions", () => {
     assert.notInclude(instructions, "<pull_request_linking>");
   });
 
+  it("names each linked folder only when the project has some", () => {
+    assert.notInclude(buildRuntimeInstructions({ harness: "Codex" }), "<linked_folders>");
+    const instructions = buildRuntimeInstructions({
+      harness: "Codex",
+      linkedFolders: [
+        { path: "/work/api", name: "api" },
+        { path: "/worktrees/web/feature", name: "web" },
+      ],
+    });
+    assert.include(instructions, "- api: /work/api\n- web: /worktrees/web/feature");
+  });
+
   it("links PRs the agent creates, takes over, or pushes to, and no others", () => {
     const instructions = buildRuntimeInstructions({ harness: "Codex" });
 

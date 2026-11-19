@@ -35,7 +35,9 @@ import {
 import { ThreadDetailsItemsMenuItems } from "./ThreadDetailsItemsMenu";
 import { resolveThreadDetailsVisibility, THREAD_DETAILS_ITEMS } from "./threadDetailsItems";
 import { useClientSettings } from "../../hooks/useSettings";
-import { useProject, useServerConfigs } from "../../state/entities";
+import { useProject, useQuietThreadShell, useServerConfigs } from "../../state/entities";
+import { useThreadRepoSelection } from "../../threadRepoSelection";
+import { ThreadRepositoriesSection } from "./ThreadRepositoriesSection";
 import { ThreadDetailsThreadPrRows } from "./ThreadDetailsPrRows";
 import { cn } from "../../lib/utils";
 import { SlidersHorizontalIcon } from "lucide-react";
@@ -105,6 +107,17 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   const activeThreadRef = { environmentId: props.environmentId, threadId: props.threadId };
   const project = useProject(scopeProjectRef(props.environmentId, props.projectId));
   const serverConfig = useServerConfigs().get(props.environmentId);
+  const threadShell = useQuietThreadShell(props.isServerThread ? activeThreadRef : null);
+  const repoSelection = useThreadRepoSelection({
+    threadRef: props.isServerThread ? activeThreadRef : null,
+    project,
+    thread: threadShell,
+    primaryCwd: props.gitCwd,
+  });
+  // Branch and worktree controls belong to the thread's own checkout, so a linked repo hides them.
+  const linkedRepoSelected =
+    repoSelection.selected !== null && repoSelection.selected.root !== null;
+  const gitActionsCwd = repoSelection.selected?.cwd ?? props.gitCwd;
   // A No project thread's folder sits inside the shared scratch root, so it must never get git.
   // Until the config and project load, a No project thread looks like any other folder.
   const offersGit =
@@ -232,6 +245,15 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 </ThreadDetailsSection>
               ) : null}
 
+              {props.isServerThread && (show.branch || show.git) ? (
+                <ThreadRepositoriesSection
+                  environmentId={props.environmentId}
+                  threadRef={activeThreadRef}
+                  selection={repoSelection}
+                  separated={density === "full"}
+                />
+              ) : null}
+
               {show.branch || show.pullRequests || show.git ? (
                 <ThreadDetailsSection
                   headingId="thread-details-version-control-heading"
@@ -240,7 +262,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   separated={density === "full"}
                 >
                   <div className="flex flex-col">
-                    {show.branch ? (
+                    {show.branch && !linkedRepoSelected ? (
                       <BranchToolbar layout="panel" panelSection="branch" {...branchToolbarProps} />
                     ) : null}
                     {show.pullRequests ? (
@@ -250,12 +272,13 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                         composerTarget={props.composerDraftTarget}
                       />
                     ) : null}
-                    {show.git && props.gitCwd ? (
+                    {show.git && gitActionsCwd ? (
                       <GitActionsControl
+                        key={gitActionsCwd}
                         compact={density !== "full"}
                         showActions={visible.gitActions}
                         showChanges={visible.changes}
-                        gitCwd={props.gitCwd}
+                        gitCwd={gitActionsCwd}
                         workspaceMutationId={props.workspaceMutationId}
                         activeThreadRef={activeThreadRef}
                         {...(props.draftId ? { draftId: props.draftId } : {})}

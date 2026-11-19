@@ -17,6 +17,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
@@ -40,6 +41,7 @@ import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
 import { makeIsWorktreeContainer } from "./worktreeContainer.ts";
+import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 
 export interface ProjectCreateInput extends ProjectCreatePayload {
@@ -186,6 +188,7 @@ export const make = Effect.gen(function* () {
   const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
   const isWorktreeContainer = yield* makeIsWorktreeContainer.pipe(
     Effect.provide(ProcessRunner.layer),
@@ -200,6 +203,7 @@ export const make = Effect.gen(function* () {
     id: row.projectId,
     title: row.title,
     workspaceRoot: row.workspaceRoot,
+    additionalRoots: row.additionalRoots,
     repositoryIdentity: enrichment?.repositoryIdentity ?? null,
     faviconPath: row.faviconPath ?? enrichment?.faviconPath ?? null,
     defaultModelSelection: row.defaultModelSelection,
@@ -274,6 +278,54 @@ export const make = Effect.gen(function* () {
       projectId,
       detail: `${workspaceRoot.trim()} is inside WSL. Add it to the WSL backend instead of the Windows one.`,
     });
+  });
+
+  // Linked folders are normalized like the main folder and must name distinct, real checkouts.
+  const resolveAdditionalRoots = Effect.fn("ProjectService.resolveAdditionalRoots")(function* (
+    projectId: ProjectId,
+    workspaceRoot: string,
+    additionalRoots: ReadonlyArray<string>,
+  ) {
+    const invalid = (detail: string) => new ProjectInvalidError({ projectId, detail });
+    const resolved: Array<string> = [];
+    for (const root of additionalRoots) {
+      yield* rejectWslSharePath(projectId, root);
+      const normalized = yield* workspacePaths
+        .normalizeWorkspaceRoot(root)
+        .pipe(
+          Effect.mapError((cause) =>
+            invalid(
+              cause._tag === "WorkspaceRootNotExistsError" ||
+                cause._tag === "WorkspaceRootNotDirectoryError"
+                ? `Linked folder ${root.trim()} is not a folder on this environment.`
+                : `Linked folder ${root.trim()} could not be read.`,
+            ),
+          ),
+        );
+      if (normalized === workspaceRoot) {
+        return yield* invalid(`${normalized} is already the project's main folder.`);
+      }
+      if (resolved.includes(normalized)) {
+        return yield* invalid(`${normalized} is linked more than once.`);
+      }
+      // A folder inside another would be reached twice and get no worktree of its own.
+      const overlapping = [workspaceRoot, ...resolved].find(
+        (other) => isWithinRoot(path, normalized, other) || isWithinRoot(path, other, normalized),
+      );
+      if (overlapping !== undefined) {
+        return yield* invalid(
+          `${normalized} overlaps ${overlapping}. Link folders that sit outside each other.`,
+        );
+      }
+      if (yield* isManagedWorktreePath(normalized)) {
+        return yield* invalid(
+          `${normalized} is a T3 Code worktree. Link the repository it belongs to instead.`,
+        );
+      }
+      yield* rejectWorktreeContainer(projectId, normalized);
+      resolved.push(normalized);
+    }
+    return resolved;
   });
 
   const commit = Effect.fn("ProjectService.commit")(function* (command: ProjectCommand) {
@@ -417,12 +469,17 @@ export const make = Effect.gen(function* () {
         createIfMissing: input.createWorkspaceRootIfMissing ?? false,
       });
       yield* rejectWorktreeContainer(input.projectId, workspaceRoot);
+      const additionalRoots =
+        input.additionalRoots === undefined
+          ? undefined
+          : yield* resolveAdditionalRoots(input.projectId, workspaceRoot, input.additionalRoots);
       yield* commit({
         type: "project.create",
         commandId: input.commandId,
         projectId: input.projectId,
         title: input.title,
         workspaceRoot,
+        ...(additionalRoots === undefined ? {} : { additionalRoots }),
         ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
       });
       yield* projectEnrichment.invalidate([workspaceRoot]);
@@ -450,12 +507,30 @@ export const make = Effect.gen(function* () {
       if (workspaceRoot !== previousRoot) {
         yield* rejectWorktreeContainer(input.projectId, workspaceRoot);
       }
+      const additionalRoots =
+        input.additionalRoots === undefined
+          ? undefined
+          : yield* resolveAdditionalRoots(input.projectId, workspaceRoot, input.additionalRoots);
+      if (
+        additionalRoots === undefined &&
+        workspaceRoot !== previousRoot &&
+        existing.value.additionalRoots.some(
+          (root) =>
+            isWithinRoot(path, workspaceRoot, root) || isWithinRoot(path, root, workspaceRoot),
+        )
+      ) {
+        return yield* new ProjectInvalidError({
+          projectId: input.projectId,
+          detail: `${workspaceRoot} overlaps a folder linked to this project. Unlink it before making this the main folder.`,
+        });
+      }
       yield* commit({
         type: "project.meta.update",
         commandId: input.commandId,
         projectId: input.projectId,
         ...(input.title === undefined ? {} : { title: input.title }),
         ...(workspaceRoot === previousRoot ? {} : { workspaceRoot }),
+        ...(additionalRoots === undefined ? {} : { additionalRoots }),
         ...(input.defaultModelSelection === undefined
           ? {}
           : { defaultModelSelection: input.defaultModelSelection }),

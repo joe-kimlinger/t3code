@@ -314,6 +314,11 @@ export class StorageCleanup extends Context.Service<
     readonly latestReport: Effect.Effect<StorageCleanupReport | null>;
     readonly reports: Stream.Stream<StorageCleanupReport | null>;
     readonly drain: Effect.Effect<void>;
+    /**
+     * Removes the linked worktrees recorded beside a thread worktree once no live thread works in
+     * it. Their branches stay, as the thread worktree's own branch does.
+     */
+    readonly removeLinkedWorktreesBeside: (worktreePath: string) => Effect.Effect<void>;
   }
 >()("t3/storageCleanup") {}
 
@@ -526,6 +531,11 @@ const make = Effect.gen(function* () {
       SELECT DISTINCT json_extract(payload_json, '$.worktreePath') AS "worktreePath"
       FROM orchestration_v2_projection_threads
       WHERE json_extract(payload_json, '$.worktreePath') IS NOT NULL
+      UNION
+      SELECT json_extract(linked.value, '$.worktreePath') AS "worktreePath"
+      FROM orchestration_v2_projection_threads,
+        json_each(orchestration_v2_projection_threads.payload_json, '$.linkedWorktrees') AS linked
+      WHERE json_extract(linked.value, '$.worktreePath') IS NOT NULL
     `.pipe(NodeSqliteClient.readOnly);
     const referenced = new Set<string>();
     for (const row of rows) {
@@ -1606,6 +1616,34 @@ const make = Effect.gen(function* () {
               execute: git.execute,
               run: (args) => cleanupGit(repository, [...args], "git worktree remove"),
             });
+            // Linked worktrees go with it while clean; their branches stay for a later restore.
+            for (const linked of thread.linkedWorktrees ?? []) {
+              yield* Effect.gen(function* () {
+                if (!(yield* fs.exists(linked.worktreePath))) return;
+                const linkedChanges = yield* localChangesReason(linked.worktreePath, {
+                  ...settings,
+                  worktreeKeepWhen: "uncommitted-changes",
+                });
+                if (linkedChanges !== null) return;
+                const linkedRepository = yield* worktreeRepository(linked.worktreePath);
+                yield* removeLinkedWorktree({
+                  operation: "StorageCleanup.cleanupGit",
+                  cwd: linkedRepository,
+                  worktreePath: linked.worktreePath,
+                  force: false,
+                  execute: git.execute,
+                  run: (args) => cleanupGit(linkedRepository, [...args], "git worktree remove"),
+                });
+              }).pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning("storage cleanup kept a linked worktree", {
+                    threadId: thread.id,
+                    worktreePath: linked.worktreePath,
+                    error,
+                  }),
+                ),
+              );
+            }
             entries.push({ ...entry, outcome: "removed", reason: sentence(removalReason), bytes });
             yield* gitManager.invalidateStatus(project.workspaceRoot);
             // Preserve branch/path so ProviderTurnStartService can recreate the checkout on resume.
@@ -1997,7 +2035,60 @@ const make = Effect.gen(function* () {
     );
   });
   yield* start();
+  const removeLinkedWorktreesBeside = Effect.fn("StorageCleanup.removeLinkedWorktreesBeside")(
+    function* (worktreePath: string) {
+      const owners = yield* sql<{
+        readonly deletedAt: string | null;
+        readonly linked: string | null;
+      }>`
+        SELECT
+          deleted_at AS "deletedAt",
+          json_extract(linked.value, '$.worktreePath') AS "linked"
+        FROM orchestration_v2_projection_threads
+        LEFT JOIN json_each(
+          orchestration_v2_projection_threads.payload_json,
+          '$.linkedWorktrees'
+        ) AS linked
+        WHERE json_extract(payload_json, '$.worktreePath') = ${worktreePath}
+      `.pipe(NodeSqliteClient.readOnly);
+      if (owners.some((owner) => owner.deletedAt === null)) return;
+      const linkedPaths = new Set(
+        owners.flatMap((owner) => (owner.linked === null ? [] : [owner.linked])),
+      );
+      for (const linkedPath of linkedPaths) {
+        yield* Effect.gen(function* () {
+          if (!(yield* fs.exists(linkedPath))) return;
+          const repository = yield* worktreeRepository(linkedPath);
+          yield* removeLinkedWorktree({
+            operation: "StorageCleanup.removeLinkedWorktreesBeside",
+            cwd: repository,
+            worktreePath: linkedPath,
+            force: true,
+            execute: git.execute,
+            run: (args) => cleanupGit(repository, [...args], "git worktree remove"),
+          });
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("failed to remove a linked worktree", {
+              worktreePath: linkedPath,
+              error,
+            }),
+          ),
+        );
+      }
+    },
+    (effect, worktreePath) =>
+      effect.pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to remove linked worktrees", { worktreePath, cause }),
+        ),
+      ),
+  );
+
   return StorageCleanup.of({
+    removeLinkedWorktreesBeside,
     runNow,
     latestReport: SubscriptionRef.get(reportRef),
     reports: SubscriptionRef.changes(reportRef),

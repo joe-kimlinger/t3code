@@ -428,6 +428,22 @@ function ProjectOverviewContent(props: {
               <Text className="text-sm leading-normal text-foreground-muted" selectable>
                 {member.workspaceRoot}
               </Text>
+              {member.additionalRoots && member.additionalRoots.length > 0 ? (
+                <View className="gap-0.5 pt-1">
+                  <Text className="font-t3-medium text-xs text-foreground-muted">
+                    <T>Linked folders</T>
+                  </Text>
+                  {member.additionalRoots.map((root) => (
+                    <Text
+                      key={root}
+                      className="text-sm leading-normal text-foreground-muted"
+                      selectable
+                    >
+                      {root}
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
               {props.members.length > 1 || props.hasOtherMembers ? (
                 <RemoveCheckoutAction
                   member={member}

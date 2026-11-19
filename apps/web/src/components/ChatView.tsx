@@ -52,6 +52,7 @@ import { usePendingThreadRequests } from "./chat/usePendingThreadRequests";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
+import { threadLinkedFolders, type ThreadLinkedFolder } from "@t3tools/contracts";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { freshSessionBannerItem } from "./chat/ComposerFreshSession";
 import { armFreshSession, disarmFreshSession, useFreshSessionArmed } from "./chat/freshSessionArms";
@@ -403,6 +404,7 @@ import {
 } from "./ChatView.logic";
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
+const EMPTY_LINKED_FOLDERS: ReadonlyArray<ThreadLinkedFolder> = [];
 const EMPTY_PROVIDER_MODELS: ServerProvider["models"] = [];
 const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
 import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
@@ -1278,6 +1280,9 @@ export default function ChatView(props: ChatViewProps) {
         worktreePath: activeThread?.worktreePath ?? null,
       })
     : null;
+  const linkedFolders = activeProject
+    ? threadLinkedFolders(activeProject, activeThreadShell ?? activeThread)
+    : EMPTY_LINKED_FOLDERS;
   const providerStatuses = resolveProvidersForCwd(
     (providerEnvironmentId === undefined
       ? undefined
@@ -3776,6 +3781,7 @@ export default function ChatView(props: ChatViewProps) {
                                 getShortcutContext={getShortcutContextStable}
                                 terminalOpen={Boolean(terminalUiState.terminalOpen)}
                                 gitCwd={gitCwd}
+                                linkedFolders={linkedFolders}
                                 pullRequestProjectId={
                                   supportsPullRequests ? (activeProject?.id ?? null) : null
                                 }
