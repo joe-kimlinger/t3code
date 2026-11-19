@@ -12,6 +12,8 @@ export function buildRuntimeInstructions(runtime: {
   readonly reasoningEffort?: string | undefined;
   /** False when the session's system prompt already carries the linking instructions. */
   readonly pullRequestLinking?: boolean;
+  /** The project's linked folders, from the runtime policy's `additionalDirectories`. */
+  readonly linkedFolders?: ReadonlyArray<{ readonly path: string; readonly name: string }>;
 }): string {
   const harness = toSingleLine(runtime.harness);
   const model = toSingleLine(runtime.model ?? "");
@@ -22,9 +24,27 @@ export function buildRuntimeInstructions(runtime: {
   const modelInfo = model && model !== "auto" && model !== "default" ? `, as ${modelLabel}` : "";
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
   const runtimeInfo = `<runtime_info>In case you're asked: you are running in T3 Code through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images, video, and audio using Markdown image syntax with absolute file paths. Link every other file you cite or produce by its absolute path, as in [http.ts:42](/abs/path/http.ts:42), so the user can open it in T3 Code's files viewer.</runtime_info>`;
-  return runtime.pullRequestLinking === false
-    ? runtimeInfo
-    : `${runtimeInfo}\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}`;
+  const sections = [
+    runtimeInfo,
+    ...(runtime.pullRequestLinking === false ? [] : [PULL_REQUEST_LINKING_INSTRUCTIONS]),
+    ...(runtime.linkedFolders === undefined || runtime.linkedFolders.length === 0
+      ? []
+      : [linkedFoldersInstructions(runtime.linkedFolders)]),
+  ];
+  return sections.join("\n\n");
+}
+
+/** Codex sends this as its own context entry; its values have a size cap. */
+export function linkedFoldersInstructions(
+  folders: ReadonlyArray<{ readonly path: string; readonly name: string }>,
+): string {
+  const list = folders
+    .map((folder) => `- ${toSingleLine(folder.name)}: ${toSingleLine(folder.path)}`)
+    .join("\n");
+  return `<linked_folders>
+This project spans these folders beside your working directory. Read, edit, and run commands in them by absolute path as part of the same work. Each one may be its own git repository:
+${list}
+</linked_folders>`;
 }
 
 function toSingleLine(value: string): string {

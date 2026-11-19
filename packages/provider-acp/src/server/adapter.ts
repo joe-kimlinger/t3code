@@ -212,6 +212,8 @@ const ACP_PROMPT_ACTIVITY_UPDATES: ReadonlySet<string> = new Set([
 
 export interface AcpAdapterV2RuntimeInput {
   readonly cwd: string;
+  /** The project's linked folders, offered to agents that support additional directories. */
+  readonly linkedDirectories?: ReadonlyArray<string>;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   readonly mcpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly acpMcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
@@ -2772,6 +2774,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         ): AcpAdapterV2RuntimeInput => {
           return {
             cwd: input.runtimePolicy.cwd ?? process.cwd(),
+            ...(input.runtimePolicy.additionalDirectories === undefined
+              ? {}
+              : {
+                  linkedDirectories: input.runtimePolicy.additionalDirectories.map(
+                    (folder) => folder.path,
+                  ),
+                }),
             runtimePolicy: input.runtimePolicy,
             mcpServers: mcpContext.servers,
             acpMcpServers: mcpContext.acpServers,
@@ -8908,6 +8917,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const runtimeInstructions = buildRuntimeInstructions({
             harness: flavor.runtimeHarness ?? driver,
             model: turnInput.modelSelection.model,
+            ...(turnInput.runtimePolicy.additionalDirectories === undefined
+              ? {}
+              : { linkedFolders: turnInput.runtimePolicy.additionalDirectories }),
             pullRequestLinking:
               sessionSetup === null ||
               flavor.sessionCarriesPullRequestLinking?.(sessionSetup.initializeResult) !== true,

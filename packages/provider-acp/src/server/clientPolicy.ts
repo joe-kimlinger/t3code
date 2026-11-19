@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 export interface AcpRuntimePolicy {
   readonly runtimeMode: RuntimeMode;
   readonly cwd: string | null;
+  readonly additionalDirectories?: ReadonlyArray<{ readonly path: string }> | undefined;
   readonly approvalPolicy?: unknown;
   readonly sandboxPolicy?: unknown;
 }
@@ -111,8 +112,11 @@ function acpWorkspaceWriteAllowsMutation(
     const canonicalCwd = acpCanonicalPathForContainment(cwd);
     if (canonicalCwd !== undefined) roots.push(canonicalCwd);
   }
-  const writableRoots = sandboxPolicy.writableRoots;
-  if (Array.isArray(writableRoots)) {
+  const writableRoots = [
+    ...(runtimePolicy.additionalDirectories ?? []).map((directory) => directory.path),
+    ...(Array.isArray(sandboxPolicy.writableRoots) ? sandboxPolicy.writableRoots : []),
+  ];
+  {
     for (const writableRoot of writableRoots) {
       if (typeof writableRoot !== "string") continue;
       const resolved = resolveAcpPermissionPath(writableRoot, cwd);
