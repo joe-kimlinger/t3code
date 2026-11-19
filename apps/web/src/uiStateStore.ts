@@ -33,6 +33,8 @@ export interface PersistedUiState {
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
   threadChildrenCollapsedByKey?: Record<string, boolean>;
   pullRequestMergeMethod?: string;
+  attentionPanelHeight?: number;
+  attentionPanelCollapsed?: boolean;
 }
 
 export interface UiProjectState {
@@ -56,8 +58,22 @@ export interface UiPullRequestState {
   pullRequestMergeMethod: PullRequestMergeMethod;
 }
 
+export interface UiAttentionPanelState {
+  /** Height of the expanded attention panel at the bottom of the sidebar, in pixels. */
+  attentionPanelHeight: number;
+  attentionPanelCollapsed: boolean;
+}
+
+export const ATTENTION_PANEL_MIN_HEIGHT = 120;
+const ATTENTION_PANEL_DEFAULT_HEIGHT = 300;
+
 export interface UiState
-  extends UiProjectState, UiThreadState, UiEndpointState, UiPullRequestState {}
+  extends
+    UiProjectState,
+    UiThreadState,
+    UiEndpointState,
+    UiPullRequestState,
+    UiAttentionPanelState {}
 
 const initialState: UiState = {
   projectExpandedById: {},
@@ -68,6 +84,8 @@ const initialState: UiState = {
   threadChildrenCollapsedByKey: {},
   defaultAdvertisedEndpointKey: null,
   pullRequestMergeMethod: "merge",
+  attentionPanelHeight: ATTENTION_PANEL_DEFAULT_HEIGHT,
+  attentionPanelCollapsed: false,
 };
 
 const LEGACY_PROJECT_CWD_PREFERENCE_PREFIX = "legacy-project-cwd:";
@@ -161,6 +179,12 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
     pullRequestMergeMethod: isPullRequestMergeMethod(parsed.pullRequestMergeMethod)
       ? parsed.pullRequestMergeMethod
       : initialState.pullRequestMergeMethod,
+    attentionPanelHeight:
+      typeof parsed.attentionPanelHeight === "number" &&
+      Number.isFinite(parsed.attentionPanelHeight)
+        ? Math.max(ATTENTION_PANEL_MIN_HEIGHT, Math.round(parsed.attentionPanelHeight))
+        : initialState.attentionPanelHeight,
+    attentionPanelCollapsed: parsed.attentionPanelCollapsed === true,
   };
 }
 
@@ -236,6 +260,8 @@ export function persistState(state: UiState): void {
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
         threadChildrenCollapsedByKey: state.threadChildrenCollapsedByKey,
         pullRequestMergeMethod: state.pullRequestMergeMethod,
+        attentionPanelHeight: state.attentionPanelHeight,
+        attentionPanelCollapsed: state.attentionPanelCollapsed,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -437,6 +463,8 @@ interface UiStateStore extends UiState {
   setPullRequestMergeMethod: (method: PullRequestMergeMethod) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
   setThreadChildrenCollapsed: (threadKey: string, collapsed: boolean) => void;
+  setAttentionPanelHeight: (height: number) => void;
+  setAttentionPanelCollapsed: (collapsed: boolean) => void;
   reorderProjects: (
     currentProjectOrder: readonly string[],
     draggedProjectIds: readonly string[],
@@ -467,6 +495,17 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
       else delete threadChildrenCollapsedByKey[threadKey];
       return { ...state, threadChildrenCollapsedByKey };
     }),
+  setAttentionPanelHeight: (height) =>
+    set((state) => {
+      const next = Math.max(ATTENTION_PANEL_MIN_HEIGHT, Math.round(height));
+      return state.attentionPanelHeight === next ? state : { ...state, attentionPanelHeight: next };
+    }),
+  setAttentionPanelCollapsed: (collapsed) =>
+    set((state) =>
+      state.attentionPanelCollapsed === collapsed
+        ? state
+        : { ...state, attentionPanelCollapsed: collapsed },
+    ),
   reorderProjects: (currentProjectOrder, draggedProjectIds, targetProjectIds) =>
     set((state) =>
       reorderProjects(state, currentProjectOrder, draggedProjectIds, targetProjectIds),

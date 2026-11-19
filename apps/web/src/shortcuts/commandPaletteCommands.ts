@@ -16,6 +16,7 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { type CommandHandler, type CommandScopeOptions, registerCommands } from "./dispatcher";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
+import { useUiStateStore } from "../uiStateStore";
 
 function consume(event: KeyboardEvent): void {
   event.preventDefault();
@@ -93,6 +94,12 @@ export function installCommandPaletteCommands(
         consume(event);
         const { theme, themeHalves, resolvedTheme } = getThemeSnapshot();
         toggleThemeEditorForTheme({ theme, themeHalves, initialAppearance: resolvedTheme });
+      },
+      "attention.toggle": (event) => {
+        consume(event);
+        if (event.repeat) return;
+        const { attentionPanelCollapsed, setAttentionPanelCollapsed } = useUiStateStore.getState();
+        setAttentionPanelCollapsed(!attentionPanelCollapsed);
       },
       "usage.open": (event) => {
         consume(event);
