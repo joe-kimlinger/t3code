@@ -125,6 +125,7 @@ import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts"
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as DocumentText from "./provider/DocumentText.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
+import * as AttentionService from "./attention/AttentionService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as GuestShareService from "./guest/GuestShareService.ts";
 import {
@@ -1481,6 +1482,7 @@ export const layerWsRpc = (
       const commandOutputHub = yield* CommandOutputHub.CommandOutputHub;
       const providerSessionManager = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
+      const attention = yield* AttentionService.AttentionService;
       const secretRequests = yield* SecretRequests.SecretRequests;
       const guestShares = yield* GuestShareService.GuestShareService;
       const pullRequests = yield* PullRequestService.PullRequestService;
@@ -2327,6 +2329,16 @@ export const layerWsRpc = (
           ),
         [ORCHESTRATION_V2_WS_METHODS.subscribePromptSuggestion]: (input) =>
           providerSessionManager.subscribePromptSuggestion(input.threadId),
+        [WS_METHODS.attentionSubscribe]: (_input) => attention.subscribe(),
+        [WS_METHODS.attentionAct]: (input) => attention.act(input),
+        [WS_METHODS.attentionThreadAsk]: (input) =>
+          Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+            Effect.andThen(attention.threadAsk(input)),
+          ),
+        [WS_METHODS.attentionReadPreferences]: (_input) => attention.readPreferences,
+        [WS_METHODS.attentionWritePreferences]: (input) => attention.writePreferences(input),
+        [WS_METHODS.attentionResetLearning]: (_input) => attention.resetLearning,
+        [WS_METHODS.attentionRerank]: (input) => attention.rerank(input),
         [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
           scheduledTasks.subscribeList().pipe(Stream.map(withVisibleWebhookUrls)),
         [WS_METHODS.scheduledTasksUpsert]: (input) => scheduledTasks.upsert(input),
