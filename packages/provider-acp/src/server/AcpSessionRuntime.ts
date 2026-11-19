@@ -129,6 +129,8 @@ export interface AcpSessionRuntimeOptions {
   readonly mcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
   /** Sent on every session/new, load, resume and fork; omitting them clears an agent's stored roots. */
   readonly additionalDirectories?: ReadonlyArray<string>;
+  /** Added to `additionalDirectories` only for agents that advertise support for them. */
+  readonly linkedDirectories?: ReadonlyArray<string>;
   /** Session `_meta`, chosen from the negotiated agent before each session setup or activation. */
   readonly sessionMeta?: (
     initializeResult: EffectAcpSchema.InitializeResponse,
@@ -2188,10 +2190,14 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
 
   const sessionSetupFields = (initializeResult: EffectAcpSchema.InitializeResponse) => {
     const meta = options.sessionMeta?.(initializeResult);
+    const additionalDirectories = [
+      ...(initializeResult.agentCapabilities?.sessionCapabilities?.additionalDirectories == null
+        ? []
+        : (options.linkedDirectories ?? [])),
+      ...(options.additionalDirectories ?? []),
+    ];
     return {
-      ...(options.additionalDirectories?.length
-        ? { additionalDirectories: options.additionalDirectories }
-        : {}),
+      ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
       ...(meta == null ? {} : { _meta: meta }),
     };
   };

@@ -2199,6 +2199,7 @@ export function makeClaudeQueryOptions(input: {
   readonly resume: boolean;
   readonly resumeSessionAt?: string;
   readonly cwd: string | null;
+  readonly linkedFolders?: ProviderAdapter.ProviderAdapterV2RuntimePolicy["additionalDirectories"];
   readonly attachmentsDir?: string;
   readonly settings?: ClaudeSettings;
   readonly promptSuggestions?: boolean;
@@ -2357,7 +2358,10 @@ export function makeClaudeQueryOptions(input: {
       type: "preset" as const,
       preset: "claude_code" as const,
       append: [
-        buildRuntimeInstructions({ harness: "Claude Code" }) +
+        buildRuntimeInstructions({
+          harness: "Claude Code",
+          ...(input.linkedFolders === undefined ? {} : { linkedFolders: input.linkedFolders }),
+        }) +
           (input.mcpServers === undefined
             ? ""
             : T3_CODE_ORCHESTRATION_INSTRUCTIONS +
@@ -2383,6 +2387,7 @@ export function makeClaudeQueryOptions(input: {
   };
   const additionalDirectories = [
     ...(input.cwd === null ? [] : [input.cwd]),
+    ...(input.linkedFolders ?? []).map((folder) => folder.path),
     ...(input.attachmentsDir === undefined ? [] : [input.attachmentsDir]),
     ...claudeLaunchArgDirectories(input.settings?.launchArgs),
   ];
@@ -13024,6 +13029,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             resume: shouldResume,
             ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
             cwd: turnInput.runtimePolicy.cwd,
+            ...(turnInput.runtimePolicy.additionalDirectories === undefined
+              ? {}
+              : { linkedFolders: turnInput.runtimePolicy.additionalDirectories }),
             attachmentsDir,
             settings: adapterOptions.settings,
             // Delegated threads have no one typing, so they never ask for suggestions.

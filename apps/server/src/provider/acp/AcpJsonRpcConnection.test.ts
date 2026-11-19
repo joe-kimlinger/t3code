@@ -1109,7 +1109,8 @@ describe("AcpSessionRuntime", () => {
           requestEvents.find((event) => event.method === method && event.status === "started")
             ?.payload,
         ).toMatchObject({
-          additionalDirectories: ["/tmp/t3-attachments"],
+          // Linked folders go only to agents that advertise additional directories, as this one does.
+          additionalDirectories: ["/tmp/t3-linked", "/tmp/t3-attachments"],
           _meta: { negotiated: "0.0.0" },
         });
       }
@@ -1125,6 +1126,7 @@ describe("AcpSessionRuntime", () => {
             },
           },
           additionalDirectories: ["/tmp/t3-attachments"],
+          linkedDirectories: ["/tmp/t3-linked"],
           sessionMeta: (initializeResult) => ({
             negotiated: initializeResult.agentInfo?.version ?? "none",
           }),
