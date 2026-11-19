@@ -107,7 +107,6 @@ import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
 import {
   ThreadPullRequestBadgeControl,
   ThreadPullRequestsMiniList,
-  ThreadWorktreeIndicator,
   prStatusIndicator,
   resolveThreadPullRequestBadge,
   terminalStatusFromRunningIds,
@@ -1346,8 +1345,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ) : null;
   const diff = latestRunDiff(thread);
   // Only the trailing icons would remain, so the row moves them to the title line instead.
+  // The branch stays in the hover details; on every row it was noise.
   const metaLineEmpty =
-    !checkoutThread.branch &&
     !showsScratchMachine &&
     prBadge === null &&
     issueBadge === null &&
@@ -1355,14 +1354,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     runningTerminalIds.length === 0;
   const metaLine = metaLineEmpty ? null : (
     <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-      {checkoutThread.branch ? (
-        <>
-          <ThreadWorktreeIndicator thread={checkoutThread} />
-          <span className="flex min-w-0 flex-1">
-            <MiddleTruncate value={checkoutThread.branch} showTitle={false} />
-          </span>
-        </>
-      ) : showsScratchMachine ? (
+      {showsScratchMachine ? (
         <>
           <EnvironmentMachineIcon
             aria-hidden
