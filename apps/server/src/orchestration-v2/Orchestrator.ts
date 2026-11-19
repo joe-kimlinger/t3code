@@ -5180,6 +5180,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 : {}),
             ...(command.branch === undefined ? {} : { branch: command.branch }),
             ...(command.worktreePath === undefined ? {} : { worktreePath: command.worktreePath }),
+            // Linked worktrees belong to the worktree they were made beside.
+            ...(command.linkedWorktrees !== undefined
+              ? { linkedWorktrees: command.linkedWorktrees }
+              : command.worktreePath !== undefined &&
+                  command.worktreePath !== thread.worktreePath &&
+                  (thread.linkedWorktrees?.length ?? 0) > 0
+                ? { linkedWorktrees: [] }
+                : {}),
             ...(command.linkedPullRequest === undefined
               ? {}
               : {

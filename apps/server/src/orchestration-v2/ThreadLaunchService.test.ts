@@ -299,6 +299,7 @@ function makeHarness(options: HarnessOptions = {}) {
               defaultThreadEnvMode: null,
               hasCustomTitle: false,
               autoPull: false,
+              additionalRoots: [],
               faviconPath: null,
               projectIcon: null,
               scripts: project.scripts,

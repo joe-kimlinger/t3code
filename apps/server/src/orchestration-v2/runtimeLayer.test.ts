@@ -3564,6 +3564,11 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         createdAt: "2026-09-07T00:00:00.000Z",
       } as const;
       yield* seedProject(project);
+      const linkedWorktree = {
+        root: "/workspace/api",
+        worktreePath: "/tmp/t3-v2-worktree-api",
+        branch: "feature/v2",
+      };
       const create = {
         type: "thread.create" as const,
         createdBy: "user" as const,
@@ -3591,6 +3596,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         title: "Renamed lifecycle thread",
         branch: "feature/v2",
         worktreePath: "/tmp/t3-v2-worktree",
+        linkedWorktrees: [linkedWorktree],
       });
       const staleWorkspaceUpdate = yield* orchestrator
         .dispatch({
@@ -3606,7 +3612,14 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       const projectionAfterStaleWorkspaceUpdate = yield* orchestrator.getThreadProjection(threadId);
       assert.equal(projectionAfterStaleWorkspaceUpdate.thread.branch, "feature/v2");
       assert.equal(projectionAfterStaleWorkspaceUpdate.thread.worktreePath, "/tmp/t3-v2-worktree");
+      assert.deepEqual(projectionAfterStaleWorkspaceUpdate.thread.linkedWorktrees, [
+        linkedWorktree,
+      ]);
       const pullRequestSnapshot = yield* orchestrator.getShellSnapshot();
+      assert.deepEqual(
+        pullRequestSnapshot.threads.find((thread) => thread.id === threadId)?.linkedWorktrees,
+        [linkedWorktree],
+      );
       const pullRequest = {
         projectId,
         repository: "owner/repository",
@@ -3828,6 +3841,22 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       const pinnedProjection = yield* orchestrator.getThreadProjection(threadId);
       assert.equal(pinnedProjection.thread.settledOverride, "active");
       assert.isNotNull(pinnedProjection.thread.unsettledAt);
+      for (const [step, worktreePath] of [
+        ["move-worktree", "/tmp/t3-v2-moved"],
+        ["restore-worktree", "/tmp/t3-v2-worktree"],
+      ] as const) {
+        yield* orchestrator.dispatch({
+          type: "thread.metadata.update",
+          commandId: CommandId.make(`runtime-layer-lifecycle-${step}`),
+          threadId,
+          worktreePath,
+        });
+        // A different worktree leaves the linked ones made beside the old one behind.
+        assert.deepEqual(
+          (yield* orchestrator.getThreadProjection(threadId)).thread.linkedWorktrees,
+          [],
+        );
+      }
 
       const archive = yield* orchestrator.dispatch({
         type: "thread.archive",

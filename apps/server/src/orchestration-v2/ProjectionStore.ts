@@ -1918,6 +1918,10 @@ export function threadShellFromProjection(
     interactionMode: projection.thread.interactionMode,
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
+    ...(projection.thread.linkedWorktrees === undefined ||
+    projection.thread.linkedWorktrees.length === 0
+      ? {}
+      : { linkedWorktrees: projection.thread.linkedWorktrees }),
     pullRequests: threadPullRequestsOf(projection.thread),
     ...(projection.thread.linkedPullRequest === undefined
       ? {}
@@ -2238,6 +2242,10 @@ function shellFromState(input: {
     interactionMode: input.state.thread.interactionMode,
     branch: input.state.thread.branch,
     worktreePath: input.state.thread.worktreePath,
+    ...(input.state.thread.linkedWorktrees === undefined ||
+    input.state.thread.linkedWorktrees.length === 0
+      ? {}
+      : { linkedWorktrees: input.state.thread.linkedWorktrees }),
     pullRequests: threadPullRequestsOf(input.state.thread),
     ...(input.state.thread.linkedPullRequest === undefined
       ? {}

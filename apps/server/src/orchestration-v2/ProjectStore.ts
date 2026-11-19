@@ -34,6 +34,7 @@ export const ProjectRow = Schema.Struct({
   title: Schema.String,
   hasCustomTitle: Schema.Boolean,
   workspaceRoot: Schema.String,
+  additionalRoots: Schema.Array(Schema.String),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   defaultThreadEnvMode: Schema.NullOr(ThreadEnvMode),
   autoPull: Schema.Boolean,
@@ -53,6 +54,7 @@ const ProjectDbRow = Schema.Struct({
   defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
   hasCustomTitle: Schema.BooleanFromBit,
   autoPull: Schema.BooleanFromBit,
+  additionalRoots: Schema.fromJsonString(Schema.Array(Schema.String)),
   projectIcon: Schema.NullOr(Schema.fromJsonString(StoredProjectIcon)),
   scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
 });
@@ -63,6 +65,7 @@ function toShell(row: ProjectRow): OrchestrationProjectShell {
     title: row.title,
     hasCustomTitle: row.hasCustomTitle,
     workspaceRoot: row.workspaceRoot,
+    additionalRoots: row.additionalRoots,
     repositoryIdentity: null,
     defaultModelSelection: row.defaultModelSelection,
     defaultThreadEnvMode: row.defaultThreadEnvMode,
@@ -122,6 +125,7 @@ export const make = Effect.gen(function* () {
         title,
         has_custom_title AS "hasCustomTitle",
         workspace_root AS "workspaceRoot",
+        additional_roots_json AS "additionalRoots",
         default_model_selection_json AS "defaultModelSelection",
         default_thread_env_mode AS "defaultThreadEnvMode",
         auto_pull AS "autoPull",
@@ -155,6 +159,7 @@ export const make = Effect.gen(function* () {
             title,
             has_custom_title,
             workspace_root,
+            additional_roots_json,
             default_model_selection_json,
             default_thread_env_mode,
             auto_pull,
@@ -172,6 +177,7 @@ export const make = Effect.gen(function* () {
             ${encoded.title},
             ${encoded.hasCustomTitle},
             ${encoded.workspaceRoot},
+            ${encoded.additionalRoots},
             ${encoded.defaultModelSelection},
             ${encoded.defaultThreadEnvMode},
             ${encoded.autoPull},
@@ -193,6 +199,7 @@ export const make = Effect.gen(function* () {
             END,
             has_custom_title = MAX(projection_projects.has_custom_title, excluded.has_custom_title),
             workspace_root = excluded.workspace_root,
+            additional_roots_json = excluded.additional_roots_json,
             default_model_selection_json = excluded.default_model_selection_json,
             default_thread_env_mode = excluded.default_thread_env_mode,
             auto_pull = excluded.auto_pull,
@@ -244,6 +251,7 @@ export const make = Effect.gen(function* () {
           title: payload.title,
           hasCustomTitle: false,
           workspaceRoot: payload.workspaceRoot,
+          additionalRoots: payload.additionalRoots ?? [],
           defaultModelSelection: payload.defaultModelSelection,
           defaultThreadEnvMode: payload.defaultThreadEnvMode ?? null,
           autoPull: false,
@@ -272,6 +280,9 @@ export const make = Effect.gen(function* () {
         ...row,
         ...(payload.title === undefined ? {} : { title: payload.title, hasCustomTitle: true }),
         ...(payload.workspaceRoot === undefined ? {} : { workspaceRoot: payload.workspaceRoot }),
+        ...(payload.additionalRoots === undefined
+          ? {}
+          : { additionalRoots: payload.additionalRoots }),
         ...(payload.defaultModelSelection === undefined
           ? {}
           : { defaultModelSelection: payload.defaultModelSelection }),
