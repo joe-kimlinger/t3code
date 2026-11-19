@@ -1686,6 +1686,51 @@ describe("deleted thread worktrees", () => {
     }).pipe(Effect.provide(cleanupTestLayer)),
   );
 
+  it.effect("removes a thread's clean linked worktrees with its own, keeping their branches", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(NOW_MS);
+      const fixture = yield* cleanupFixture();
+      const { fs, command } = fixture;
+      const linkedRepo = yield* fs.realPath(
+        yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-linked-" }),
+      );
+      yield* command(linkedRepo, ["init", "-b", "main"]);
+      yield* command(linkedRepo, [
+        "-c",
+        "user.name=Cleanup test",
+        "-c",
+        "user.email=cleanup@example.test",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "initial",
+      ]);
+      const clean = `${fixture.config.worktreesDir}/api-clean`;
+      const edited = `${fixture.config.worktreesDir}/api-edited`;
+      yield* command(linkedRepo, ["worktree", "add", "-b", "feature", clean]);
+      yield* command(linkedRepo, ["worktree", "add", "-b", "other", edited]);
+      yield* fs.writeFileString(`${edited}/notes.txt`, "unsaved work\n");
+      fixture.setThreads([
+        shell({
+          branch: "feature",
+          worktreePath: fixture.worktree,
+          linkedWorktrees: [
+            { root: linkedRepo, worktreePath: clean, branch: "feature" },
+            { root: linkedRepo, worktreePath: edited, branch: "other" },
+          ],
+        }),
+      ]);
+      const report = yield* fixture.service.runNow;
+      expect(report.entries[0]).toMatchObject({ outcome: "removed" });
+      expect(yield* fs.exists(fixture.worktree)).toBe(false);
+      expect(yield* fs.exists(clean)).toBe(false);
+      expect(yield* fs.readFileString(`${edited}/notes.txt`)).toBe("unsaved work\n");
+      expect((yield* command(linkedRepo, ["branch", "--list", "feature"])).stdout).toContain(
+        "feature",
+      );
+    }).pipe(Effect.provide(cleanupTestLayer)),
+  );
+
   // Releases one stopped-session event after the startup sweep and returns the snapshot reads it caused.
   const stopSessionAfterStartupSweep = (
     fixture: Effect.Success<ReturnType<typeof cleanupFixture>>,

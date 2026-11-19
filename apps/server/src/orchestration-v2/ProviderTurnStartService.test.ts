@@ -345,6 +345,62 @@ effectIt.effect("restores a missing worktree before a send only under the worksp
   }).pipe(Effect.provide(layerRestoreLeaseTest)),
 );
 
+effectIt.effect(
+  "restores a missing linked worktree from its own repository, while still linked",
+  () => {
+    const worktreePath = `${managedWorktreesDir}/project/feature-restore`;
+    const linkedPath = `${managedWorktreesDir}/api/feature-restore`;
+    const unlinkedPath = `${managedWorktreesDir}/old/feature-restore`;
+    const createWorktree = vi.fn(
+      (_input: { readonly cwd: string; readonly path?: string | null }) =>
+        Effect.succeed({} as never),
+    );
+    return Effect.gen(function* () {
+      const { restore } = yield* ThreadWorktreeRestore;
+      yield* restore({
+        id: ThreadId.make("thread_linked_restore"),
+        projectId: ProjectId.make("project_linked_restore"),
+        worktreePath,
+        branch: "feature/restore",
+        linkedWorktrees: [
+          { root: "/tmp/api", worktreePath: linkedPath, branch: "feature/restore" },
+          // Its folder was unlinked from the project, so nothing brings it back.
+          { root: "/tmp/old", worktreePath: unlinkedPath, branch: "feature/restore" },
+        ],
+      });
+      expect(createWorktree.mock.calls.map(([input]) => [input.cwd, input.path])).toEqual([
+        ["/tmp/api", linkedPath],
+      ]);
+    }).pipe(
+      Effect.provide(
+        layerThreadWorktreeRestore.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(FileSystem.FileSystem, {
+                exists: (target: string) => Effect.succeed(target.startsWith(worktreePath)),
+                realPath: (target: string) => Effect.succeed(normalize(target)),
+              } as never),
+              layerWorktreeLocation(),
+              Layer.mock(GitWorkflow.GitWorkflowService)({
+                pruneWorktrees: () => Effect.void,
+                createWorktree,
+                listLocalBranchNames: () => Effect.succeed(["feature/restore"]),
+              }),
+              Layer.mock(ProjectService.ProjectService)({
+                getById: () =>
+                  Effect.succeedSome({
+                    workspaceRoot: "/tmp/provider-turn-start-project",
+                    additionalRoots: ["/tmp/api"],
+                  } as never),
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  },
+);
+
 effectIt.effect("restores into a leftover worktree folder that cannot itself be removed", () => {
   const worktreePath = `${managedWorktreesDir}/project/feature-restore`;
   // Windows refuses to remove a folder that is still some process's cwd.
