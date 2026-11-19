@@ -23,7 +23,7 @@ export class UnknownWorkspaceError extends Schema.TaggedError<UnknownWorkspaceEr
   },
 ) {
   override get message(): string {
-    return `'${this.cwd}' is not a registered project, a managed worktree, or a thread's worktree.`;
+    return `'${this.cwd}' is not a registered project or linked folder, a managed worktree, or a thread's worktree.`;
   }
 }
 
@@ -88,7 +88,9 @@ export const make = Effect.gen(function* () {
 
       const projects = yield* projectStore.listShells().pipe(Effect.orElseSucceed(() => []));
       for (const project of projects) {
-        if (within(yield* resolveRoot(project.workspaceRoot))) return true;
+        for (const root of [project.workspaceRoot, ...(project.additionalRoots ?? [])]) {
+          if (within(yield* resolveRoot(root))) return true;
+        }
       }
 
       const threads = yield* sql<{ readonly worktreePath: string; readonly projectId: string }>`

@@ -145,6 +145,7 @@ interface HarnessOptions {
     dispatch: ThreadManagement.ThreadManagementService["Service"]["dispatch"],
   ) => ReturnType<ThreadManagement.ThreadManagementService["Service"]["dispatch"]>;
   readonly isGitRepository?: CheckpointStore.CheckpointStore["Service"]["isGitRepository"];
+  readonly additionalRoots?: ReadonlyArray<string>;
 }
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -207,7 +208,7 @@ function makeHarness(options: HarnessOptions = {}) {
       getById: (id) =>
         Effect.succeed(
           id === projectId
-            ? Option.some(project)
+            ? Option.some({ ...project, additionalRoots: options.additionalRoots ?? [] })
             : id === otherProjectId
               ? Option.some(otherProject)
               : Option.none(),
@@ -275,6 +276,7 @@ function makeHarness(options: HarnessOptions = {}) {
         layerReceipts,
         layerOrchestrator,
         IdAllocator.layer,
+        NodeServices.layer,
         options.getLaunchSettings === undefined
           ? Layer.empty
           : Layer.mock(ServerSettings.ServerSettingsService)({
@@ -2964,6 +2966,74 @@ it.effect("starts the agent of a new worktree thread only after its branch is re
       );
     }).pipe(Effect.provide(harness.layer));
   }),
+);
+
+it.effect("makes a worktree on the thread's branch in each linked git repository", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const fixture = yield* fileSystem.makeTempDirectoryScoped({ prefix: "launch-linked-" });
+    const api = `${fixture}/api`;
+    const notes = `${fixture}/notes`;
+    yield* fileSystem.makeDirectory(`${api}/.git`, { recursive: true });
+    yield* fileSystem.makeDirectory(notes);
+    const renamed = yield* Deferred.make<void>();
+    const harness = makeHarness({
+      additionalRoots: [api, notes],
+      createWorktree: (input) =>
+        Effect.succeed({
+          worktree: {
+            path: input.cwd === api ? "/api-worktrees/feature" : "/repo-worktrees/feature",
+            refName: input.newRefName,
+            headSha: "abc",
+          },
+        } as never),
+      dispatch: (command, dispatch) =>
+        dispatch(command).pipe(
+          Effect.tap(() =>
+            command.type === "thread.metadata.update" &&
+            command.commandId.endsWith(":branch-rename")
+              ? Deferred.succeed(renamed, undefined)
+              : Effect.void,
+          ),
+        ),
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "launch:linked-worktrees",
+          thread: "thread:linked-worktrees",
+          message: "Start",
+          workspace: { type: "worktree", baseRef: "main" },
+        }),
+      );
+      yield* Deferred.await(renamed);
+
+      const linkedCreate = harness.createWorktree.mock.calls
+        .map(([input]) => input)
+        .find((input) => input.cwd === api);
+      // Based on the linked repository's default branch, on the same temporary branch.
+      assert.deepInclude(linkedCreate, {
+        refName: "remote-main-sha",
+        baseRefName: "refs/remotes/origin/main",
+        path: null,
+      });
+      assert.notInclude(
+        harness.createWorktree.mock.calls.map(([input]) => input.cwd),
+        notes,
+        "a plain folder is used as it is",
+      );
+      assert.include(
+        harness.renameBranch.mock.calls.map(([input]) => input.cwd),
+        "/api-worktrees/feature",
+      );
+      const thread = (yield* threads.getThreadProjection(launched.threadId)).thread;
+      assert.deepEqual(thread.linkedWorktrees, [
+        { root: api, worktreePath: "/api-worktrees/feature", branch: "generated-branch" },
+      ]);
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
 it.effect("tells the thread when its worktree branch could not be renamed", () =>
