@@ -131,6 +131,21 @@ rename a thread, regenerate its title, or link and unlink a pull request. These 
 appear on web, desktop, and mobile without requiring the originating browser to remain
 open.
 
+### Nest threads
+
+Put a thread under another to group related work. On web and desktop, drag a thread to just below
+the thread you want as its parent and move the pointer right until it indents; move it left to
+take it back out. You can also pick **Move under…** or **Move to top level** from a thread's menu.
+On mobile, choose **Move under…** from the thread's menu; the picker also offers **Move to top
+level**. A nested thread stays with its parent, in the parent's section, whatever its own state.
+Use the arrow beside a parent to fold its nested threads; a folded parent shows a dot when one of
+them needs you.
+
+A thread an agent starts with `t3_thread_launch` or `create_threads` nests under the thread that
+started it. When you archive or delete a parent, its nested threads move up a level. Agents read
+this arrangement when you ask them to talk to their parent, so after you move a thread its agent
+reaches the new parent. You can also ask an agent to nest or unnest a thread.
+
 ### Fold working threads (beta)
 
 Threads that are working or waiting on work they will resume from move into a collapsed
