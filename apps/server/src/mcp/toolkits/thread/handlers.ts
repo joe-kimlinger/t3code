@@ -386,6 +386,18 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         case "mark_unread":
           command = { ...common, type: "thread.mark-unread" };
           break;
+        case "nest":
+          if (input.parentThreadId === undefined) {
+            return yield* new OrchestratorMcpFailure({
+              code: "invalid_request",
+              message: "nest requires parentThreadId.",
+            });
+          }
+          command = { ...common, type: "thread.arrange", parentThreadId: input.parentThreadId };
+          break;
+        case "unnest":
+          command = { ...common, type: "thread.arrange", parentThreadId: null };
+          break;
         case "pin": {
           // Always send a key, as the client does: the reducer ignores it for a
           // thread that is already pinned, and a projection read before this

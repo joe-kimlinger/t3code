@@ -423,7 +423,10 @@ export const OrchestratorMcpThreadListItem = Schema.Struct({
   blockedOnThreadWait: Schema.optional(Schema.Boolean),
   /** Absent from linked environments that predate it. */
   pendingBackgroundTasks: Schema.optional(Schema.Array(OrchestratorMcpThreadBackgroundTask)),
+  /** The user's current arrangement for listed threads; the execution parent for subagents. */
   parentThreadId: Schema.NullOr(ThreadId),
+  /** The thread that spawned or forked this one, which drives task results. Absent from older servers. */
+  executionParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   /** The linked environment's thread that delegated this one; absent otherwise. */
   delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
@@ -437,6 +440,8 @@ export const OrchestratorMcpThreadListResult = Schema.Struct({
   /** null with `allProjects`. */
   projectId: Schema.NullOr(ProjectId),
   currentThreadId: Schema.NullOr(ThreadId),
+  /** The calling thread's `parentThreadId`, read now; absent outside a thread or from older servers. */
+  currentParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   threads: Schema.Array(OrchestratorMcpThreadListItem),
   nextCursor: Schema.NullOr(NonNegativeInt),
   total: NonNegativeInt,
@@ -482,7 +487,10 @@ export const OrchestratorMcpThreadDetail = Schema.Struct({
   lastTitleRegeneration: Schema.optional(Schema.NullOr(LastThreadTitleRegeneration)),
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
+  /** The user's current arrangement for listed threads; the execution parent for subagents. */
   parentThreadId: Schema.NullOr(ThreadId),
+  /** The thread that spawned or forked this one, which drives task results. Absent from older servers. */
+  executionParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   /** The linked environment's thread that delegated this one; absent otherwise. */
   delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),

@@ -65,6 +65,7 @@ import {
   latestProviderTurnForAttempt,
   resolveProjectProviderInstanceEnabled,
   SECRET_REQUEST_UNSAVED_NOTE,
+  effectiveParentThreadId,
 } from "@t3tools/contracts";
 import { getProviderOptionCurrentValue, withLegacyUltracodeEffort } from "@t3tools/shared/model";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
@@ -970,7 +971,8 @@ function listItemFromShell(
     ...threadSnooze(shell, nowMs),
     pinned: shell.pinnedAt != null,
     ...threadBackgroundWork(shell),
-    parentThreadId: shell.lineage.parentThreadId,
+    parentThreadId: effectiveParentThreadId(shell),
+    executionParentThreadId: shell.lineage.parentThreadId,
     relationshipToParent: shell.lineage.relationshipToParent,
     ...(shell.delegatedFrom == null ? {} : { delegatedFrom: shell.delegatedFrom }),
     itemCount: shell.visibleItemCount,
@@ -1023,7 +1025,8 @@ function threadDetail(
           },
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
-    parentThreadId: projection.thread.lineage.parentThreadId,
+    parentThreadId: effectiveParentThreadId(projection.thread),
+    executionParentThreadId: projection.thread.lineage.parentThreadId,
     relationshipToParent: projection.thread.lineage.relationshipToParent,
     ...(projection.thread.delegatedFrom == null
       ? {}
@@ -3149,6 +3152,7 @@ const make = Effect.gen(function* () {
                   ...(parent.thread.linkOrigin === undefined
                     ? {}
                     : { linkOrigin: parent.thread.linkOrigin }),
+                  arrangedParentThreadId: scope.thread.threadId,
                   ...(initialMessage === undefined ? {} : { initialMessage }),
                 })
                 .pipe(
@@ -3351,6 +3355,9 @@ const make = Effect.gen(function* () {
       return {
         projectId,
         currentThreadId: parent?.thread.id ?? null,
+        ...(parent === undefined
+          ? {}
+          : { currentParentThreadId: effectiveParentThreadId(parent.thread) }),
         threads: page.map((shell) => listItemFromShell(scope, shell, nowMs)),
         nextCursor,
         total,
