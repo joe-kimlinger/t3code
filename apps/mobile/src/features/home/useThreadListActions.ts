@@ -4,7 +4,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import * as ThreadUndo from "@t3tools/client-runtime/state/thread-undo";
 import { showThreadUndoNotice } from "./thread-undo-notice";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, type ThreadId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Haptics from "expo-haptics";
 import { msg } from "gt-react-native";
@@ -239,6 +239,11 @@ export function useThreadListActions(): {
   readonly setThreadAutoSettle: (
     thread: EnvironmentThreadShell,
     enabled: boolean,
+  ) => Promise<boolean>;
+  /** Nests `thread` under `parentThreadId` in thread lists, or moves it to the top level with null. */
+  readonly arrangeThread: (
+    thread: EnvironmentThreadShell,
+    parentThreadId: ThreadId | null,
   ) => Promise<boolean>;
   readonly moveThread: (
     thread: EnvironmentThreadShell,
@@ -803,6 +808,27 @@ export function useThreadListActions(): {
     return moved;
   };
 
+  const arrangeMutation = useAtomCommand(threadEnvironment.arrange, { reportFailure: false });
+  const arrangeThread = async (thread: EnvironmentThreadShell, parentThreadId: ThreadId | null) => {
+    if (!checkThreadOperationPermission(thread, m(msg("Could not move thread")))) return false;
+    selectionHaptic();
+    const result = await arrangeMutation({
+      environmentId: thread.environmentId,
+      input: { threadId: thread.id, parentThreadId },
+    });
+    if (result._tag === "Failure") {
+      const error = Cause.squash(result.cause);
+      Dialog.alert(
+        m(msg("Could not move thread")),
+        error instanceof Error && errorDisplayMessage(error, m) !== null
+          ? (errorDisplayMessage(error, m) ?? error.message)
+          : m(msg("The thread could not be moved.")),
+      );
+      return false;
+    }
+    return true;
+  };
+
   const confirmDeleteThread = (thread: EnvironmentThreadShell) =>
     confirmThreadDeletion(executeAction, thread);
 
@@ -818,6 +844,7 @@ export function useThreadListActions(): {
     unpinThread: (thread) => unpinThread(liveThread(thread)),
     setThreadAutoSettle: (thread, enabled) => setThreadAutoSettle(liveThread(thread), enabled),
     moveThread,
+    arrangeThread: (thread, parentThreadId) => arrangeThread(liveThread(thread), parentThreadId),
     renameThread: (thread) => renameThread(liveThread(thread)),
     regenerateThreadTitle: (thread) => regenerateThreadTitle(liveThread(thread)),
   };
