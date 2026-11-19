@@ -4571,7 +4571,10 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           orchestrator.getThreadProjection(threadId),
           (projection) => projection.thread.arrangedParentThreadId ?? null,
         );
-      const [a, b, c, other] = ["a", "b", "c", "other"].map((id) => ThreadId.make(`arrange-${id}`));
+      const a = ThreadId.make("arrange-a");
+      const b = ThreadId.make("arrange-b");
+      const c = ThreadId.make("arrange-c");
+      const other = ThreadId.make("arrange-other");
       yield* create("a");
       yield* create("b");
       yield* create("c");
