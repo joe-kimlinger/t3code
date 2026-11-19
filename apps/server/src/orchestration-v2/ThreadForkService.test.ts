@@ -143,6 +143,8 @@ it.effect("resets a fork's pin, snooze, settle and delegation state but keeps it
       pinnedAt: snoozedAt,
       pinOrderKey: "a0",
       activeOrderKey: "a1",
+      arrangedParentThreadId: ThreadId.make("source-parent"),
+      arrangedOrderKey: "m",
       autoSettleDisabledAt: snoozedAt,
       delegatedFrom: {
         environmentId: EnvironmentId.make("linked-environment"),
@@ -165,6 +167,18 @@ it.effect("resets a fork's pin, snooze, settle and delegation state but keeps it
     assert.isNull(result.targetThread.pinnedAt);
     assert.isNull(result.targetThread.pinOrderKey);
     assert.isNull(result.targetThread.activeOrderKey);
+    // A fork nests under its source, not beside it with the source's sibling position.
+    assert.equal(result.targetThread.arrangedParentThreadId, sourceThread.id);
+    assert.isUndefined(result.targetThread.arrangedOrderKey);
+    // A delegated thread cannot start a side chat, so this source drops its delegation.
+    const { delegatedFrom: _delegatedFrom, ...localSource } = sourceThread;
+    const sideChat = yield* planFork(
+      sourceRun,
+      { ...makeSourceProjection(sourceRun), thread: localSource },
+      { sideChat: true },
+    );
+    assert.isUndefined(sideChat.targetThread.arrangedParentThreadId);
+    assert.isUndefined(sideChat.targetThread.arrangedOrderKey);
     assert.isNull(result.targetThread.autoSettleDisabledAt);
     assert.isUndefined(result.targetThread.delegatedFrom);
     assert.equal(result.targetThread.historyOrigin, "v1_import");

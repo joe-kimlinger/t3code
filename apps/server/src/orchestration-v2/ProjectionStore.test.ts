@@ -12,6 +12,7 @@ import {
   ContextHandoffId,
   MessageId,
   type ModelSelection,
+  type OrchestrationV2AppThread,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2TurnItem,
   type OrchestrationV2ThreadHistoryPage,
@@ -3171,6 +3172,87 @@ it.effect("SQL shells read a subagent family and a worktree's threads", () =>
       payload: { ...payloadOf({ name: "root", worktreePath }), deletedAt: now },
     });
     assert.sameMembers([...(yield* family(id("root")))], [id("child"), id("grandchild")]);
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("lists a parent's nested threads, not its side chats or subagents", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const now = yield* DateTime.now;
+    const projectId = ProjectId.make("project:arranged");
+    const id = (name: string) => ThreadId.make(`thread:arranged:${name}`);
+    const parent = id("parent");
+    const create = (
+      name: string,
+      lineage: Partial<OrchestrationV2AppThread["lineage"]>,
+      arranged: { readonly arrangedParentThreadId?: ThreadId | null } = {},
+    ) =>
+      store.apply({
+        id: EventId.make(`event:arranged:${name}`),
+        type: "thread.created",
+        threadId: id(name),
+        occurredAt: now,
+        payload: {
+          createdBy: "user",
+          creationSource: "web",
+          id: id(name),
+          projectId,
+          title: name,
+          providerInstanceId,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          activeProviderThreadId: null,
+          lineage: {
+            parentThreadId: null,
+            relationshipToParent: null,
+            rootThreadId: id(name),
+            ...lineage,
+          },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+          ...arranged,
+        },
+      });
+    yield* create("parent", {});
+    yield* create("nested", {}, { arrangedParentThreadId: parent });
+    // Never arranged, so it sits under the thread it forked from.
+    yield* create("fork", { parentThreadId: parent, relationshipToParent: "fork" });
+    yield* create(
+      "fork-moved-out",
+      { parentThreadId: parent, relationshipToParent: "fork" },
+      {
+        arrangedParentThreadId: null,
+      },
+    );
+    yield* create(
+      "side-chat",
+      { parentThreadId: parent, relationshipToParent: "fork", sideChat: true },
+      { arrangedParentThreadId: parent },
+    );
+    yield* create("subagent", { parentThreadId: parent, relationshipToParent: "subagent" });
+
+    assert.sameMembers(
+      [...(yield* store.listArrangedChildThreadIds(projectId, parent))],
+      [id("nested"), id("fork")],
+    );
+    // Moving a thread to the top level must survive into shells, or it falls back to its fork source.
+    const shells = new Map(
+      (yield* store.getShellSnapshot({ location: "active" })).threads.map((thread) => [
+        thread.id,
+        thread,
+      ]),
+    );
+    assert.isNull(shells.get(id("fork-moved-out"))?.arrangedParentThreadId);
+    assert.isUndefined(shells.get(id("fork"))?.arrangedParentThreadId);
   }).pipe(Effect.provide(layerTest)),
 );
 

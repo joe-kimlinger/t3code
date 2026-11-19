@@ -10,6 +10,7 @@ import {
   OrchestrationV2Run,
   OrchestrationV2ThreadProjection,
   ThreadId,
+  isListedThreadLineage,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -100,13 +101,22 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
         });
       }
       // The remote parent delegated the source thread, not its forks.
-      const { delegatedFrom: _delegatedFrom, ...inherited } = input.sourceProjection.thread;
+      // A fork nests under its source; its sibling position and a side chat's arrangement do not carry over.
+      const {
+        delegatedFrom: _delegatedFrom,
+        arrangedParentThreadId: _arrangedParentThreadId,
+        arrangedOrderKey: _arrangedOrderKey,
+        ...inherited
+      } = input.sourceProjection.thread;
       const targetThread: OrchestrationV2AppThread = {
         ...inherited,
         // PR context follows the conversation; watching remains the source thread's responsibility.
         pullRequests: input.sourceProjection.thread.pullRequests?.map(
           ({ watch: _watch, ...link }) => link,
         ),
+        ...(input.sideChat || !isListedThreadLineage(sourceLineage)
+          ? {}
+          : { arrangedParentThreadId: input.sourceProjection.thread.id }),
         createdBy: input.createdBy,
         creationSource: input.creationSource,
         id: input.targetThreadId,

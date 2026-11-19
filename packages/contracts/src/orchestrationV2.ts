@@ -180,15 +180,16 @@ export const isListedThreadLineage = (lineage: OrchestrationV2AppThreadLineage):
   lineage.relationshipToParent !== "subagent" && lineage.sideChat !== true;
 
 /**
- * The thread an agent should treat as its parent. Listed threads follow the user's arrangement,
- * which can change at any time; subagents and side chats keep their execution parent.
+ * The thread an agent should treat as its parent, which the user can change at any time.
+ * `arrangedParentThreadId` null means the user moved the thread to the top level; absent means
+ * it was never arranged, so it keeps its execution parent (a fork's source, a task's caller).
  */
 export const effectiveParentThreadId = (thread: {
   readonly lineage: OrchestrationV2AppThreadLineage;
   readonly arrangedParentThreadId?: ThreadId | null | undefined;
 }): ThreadId | null =>
-  isListedThreadLineage(thread.lineage)
-    ? (thread.arrangedParentThreadId ?? null)
+  isListedThreadLineage(thread.lineage) && thread.arrangedParentThreadId !== undefined
+    ? thread.arrangedParentThreadId
     : thread.lineage.parentThreadId;
 
 export const OrchestrationV2ContextTransferType = Schema.Literals([
@@ -535,7 +536,10 @@ export const OrchestrationV2AppThread = Schema.Struct({
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
-  /** Where the user arranged this thread in thread lists; independent of execution `lineage`. */
+  /**
+   * Where the user arranged this thread in thread lists; independent of execution `lineage`.
+   * null is the top level by choice; absent means never arranged (see `effectiveParentThreadId`).
+   */
   arrangedParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   /** Order among siblings under `arrangedParentThreadId`. */
   arrangedOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -2298,7 +2302,10 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
-  /** Where the user arranged this thread in thread lists; independent of execution `lineage`. */
+  /**
+   * Where the user arranged this thread in thread lists; independent of execution `lineage`.
+   * null is the top level by choice; absent means never arranged (see `effectiveParentThreadId`).
+   */
   arrangedParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   /** Order among siblings under `arrangedParentThreadId`. */
   arrangedOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),

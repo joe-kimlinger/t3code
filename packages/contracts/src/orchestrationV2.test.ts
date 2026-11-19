@@ -2,8 +2,9 @@ import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
-import { NodeId, RunAttemptId, TrimmedNonEmptyString } from "./index.ts";
+import { NodeId, RunAttemptId, ThreadId, TrimmedNonEmptyString } from "./index.ts";
 import {
+  effectiveParentThreadId,
   latestProviderTurnForAttempt,
   OrchestrationV2CheckpointFileSummary,
   OrchestrationV2ProviderCapabilities,
@@ -648,5 +649,33 @@ describe("latestProviderTurnForAttempt", () => {
     ];
     expect(latestProviderTurnForAttempt(turns, RunAttemptId.make("goal-attempt"))?.id).toBe("last");
     expect(latestProviderTurnForAttempt(turns, null)).toBeUndefined();
+  });
+});
+
+describe("effectiveParentThreadId", () => {
+  const source = ThreadId.make("source");
+  const arranged = ThreadId.make("arranged");
+  const fork = {
+    parentThreadId: source,
+    relationshipToParent: "fork" as const,
+    rootThreadId: source,
+  };
+  it.each([
+    ["a never-arranged fork keeps its source", fork, undefined, source],
+    ["an arranged fork follows the arrangement", fork, arranged, arranged],
+    ["a fork moved to the top level has no parent", fork, null, null],
+    [
+      "a subagent keeps its caller whatever it carries",
+      { ...fork, relationshipToParent: "subagent" as const },
+      arranged,
+      source,
+    ],
+  ] as const)("%s", (_name, lineage, arrangedParentThreadId, expected) => {
+    expect(
+      effectiveParentThreadId({
+        lineage,
+        ...(arrangedParentThreadId === undefined ? {} : { arrangedParentThreadId }),
+      }),
+    ).toBe(expected);
   });
 });
