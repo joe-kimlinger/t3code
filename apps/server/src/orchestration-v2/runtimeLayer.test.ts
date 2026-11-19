@@ -4538,6 +4538,106 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("arranges threads under parents and moves children up when a parent leaves", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projectId = ProjectId.make("arrange-project");
+      const create = (id: string, options: { project?: ProjectId; parent?: ThreadId } = {}) =>
+        orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`arrange-create-${id}`),
+          threadId: ThreadId.make(`arrange-${id}`),
+          projectId: options.project ?? projectId,
+          title: id,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          ...(options.parent === undefined ? {} : { arrangedParentThreadId: options.parent }),
+        });
+      const arrange = (id: string, threadId: ThreadId, parentThreadId: ThreadId | null) =>
+        orchestrator.dispatch({
+          type: "thread.arrange",
+          commandId: CommandId.make(`arrange-${id}`),
+          threadId,
+          parentThreadId,
+          ...(parentThreadId === null ? {} : { orderKey: "a0" }),
+        });
+      const arrangedParent = (threadId: ThreadId) =>
+        Effect.map(
+          orchestrator.getThreadProjection(threadId),
+          (projection) => projection.thread.arrangedParentThreadId ?? null,
+        );
+      const [a, b, c, other] = ["a", "b", "c", "other"].map((id) => ThreadId.make(`arrange-${id}`));
+      yield* create("a");
+      yield* create("b");
+      yield* create("c");
+      yield* create("other", { project: ProjectId.make("arrange-other-project") });
+      // A launcher's child nests under it; one it cannot hold stays top level.
+      yield* create("launched", { parent: a });
+      yield* create("launched-elsewhere", { parent: other });
+      const launched = ThreadId.make("arrange-launched");
+      assert.equal(yield* arrangedParent(launched), a);
+      assert.isNull(yield* arrangedParent(ThreadId.make("arrange-launched-elsewhere")));
+
+      yield* arrange("b-under-a", b, a);
+      yield* arrange("c-under-b", c, b);
+      const updatedAtBefore = (yield* orchestrator.getThreadProjection(c)).thread.updatedAt;
+      assert.equal(yield* arrangedParent(c), b);
+      assert.equal((yield* orchestrator.getThreadProjection(c)).thread.arrangedOrderKey, "a0");
+      // Arranging is not activity, so the thread keeps its place in recency-sorted lists.
+      assert.isTrue(
+        DateTime.Equivalence(
+          (yield* orchestrator.getThreadProjection(c)).thread.updatedAt,
+          updatedAtBefore,
+        ),
+      );
+      for (const [id, threadId, parentThreadId, cause] of [
+        ["cycle", a, c, "cycle"],
+        ["self", a, a, "itself"],
+        ["missing", b, ThreadId.make("arrange-missing"), "does not exist"],
+        ["other-project", b, other, "another project"],
+      ] as const) {
+        const refused = yield* arrange(id, threadId, parentThreadId).pipe(Effect.flip);
+        assert.instanceOf(refused, Orchestrator.OrchestratorDispatchError, id);
+        assert.include(String(refused.cause), cause, id);
+      }
+
+      // Archiving b moves c up to a; deleting a moves its children to the top level.
+      yield* orchestrator.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.make("arrange-archive-b"),
+        threadId: b,
+      });
+      assert.equal(yield* arrangedParent(c), a);
+      assert.isNull((yield* orchestrator.getThreadProjection(c)).thread.arrangedOrderKey);
+      const archivedParent = yield* arrange("under-archived", launched, b).pipe(Effect.flip);
+      assert.include(String(archivedParent.cause), "archived");
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("arrange-delete-a"),
+        threadId: a,
+      });
+      assert.isNull(yield* arrangedParent(c));
+      assert.isNull(yield* arrangedParent(launched));
+      // b's parent is gone, so it comes back at the top level.
+      yield* orchestrator.dispatch({
+        type: "thread.unarchive",
+        commandId: CommandId.make("arrange-unarchive-b"),
+        threadId: b,
+      });
+      assert.isNull(yield* arrangedParent(b));
+
+      yield* arrange("c-under-b-again", c, b);
+      yield* arrange("c-unnest", c, null);
+      assert.isNull(yield* arrangedParent(c));
+      assert.isNull((yield* orchestrator.getThreadProjection(c)).thread.arrangedOrderKey);
+    }),
+  );
+
   it.effect.each([
     { reason: "failed", activityFails: false },
     { reason: "not-found", activityFails: false },

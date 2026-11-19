@@ -568,6 +568,11 @@ export interface ProjectionStoreV2Shape {
   readonly getSubagentCount: (threadId: ThreadId) => Effect.Effect<number, ProjectionStoreV2Error>;
   readonly getRunCount: (threadId: ThreadId) => Effect.Effect<number, ProjectionStoreV2Error>;
   /** Child threads of the thread's app-owned tasks, in task order, without decoding the tasks. */
+  /** Live, unarchived threads the user arranged under `parentThreadId`. */
+  readonly listArrangedChildThreadIds: (
+    projectId: ProjectId,
+    parentThreadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<ThreadId>, ProjectionStoreV2Error>;
   readonly listAppOwnedChildThreadIds: (
     threadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ThreadId>, ProjectionStoreV2Error>;
@@ -1061,6 +1066,7 @@ export function applyToProjection(
       };
     // Reordering and PR refreshes preserve the orchestrator's activity timestamp.
     case "thread.active-reordered":
+    case "thread.arranged":
     case "thread.tags-updated":
     case "thread.pull-request-synced":
     case "thread.issue-synced":
@@ -1923,6 +1929,12 @@ export function threadShellFromProjection(
     ...(projection.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: projection.thread.activeOrderKey }),
+    ...(projection.thread.arrangedParentThreadId == null
+      ? {}
+      : { arrangedParentThreadId: projection.thread.arrangedParentThreadId }),
+    ...(projection.thread.arrangedOrderKey == null
+      ? {}
+      : { arrangedOrderKey: projection.thread.arrangedOrderKey }),
     lineage: projection.thread.lineage,
     forkedFrom: projection.thread.forkedFrom,
     activeProviderThreadId: projection.thread.activeProviderThreadId,
@@ -2237,6 +2249,12 @@ function shellFromState(input: {
     ...(input.state.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: input.state.thread.activeOrderKey }),
+    ...(input.state.thread.arrangedParentThreadId == null
+      ? {}
+      : { arrangedParentThreadId: input.state.thread.arrangedParentThreadId }),
+    ...(input.state.thread.arrangedOrderKey == null
+      ? {}
+      : { arrangedOrderKey: input.state.thread.arrangedOrderKey }),
     lineage: input.state.thread.lineage,
     forkedFrom: input.state.thread.forkedFrom,
     activeProviderThreadId: input.state.thread.activeProviderThreadId,
@@ -2478,6 +2496,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             case "thread.unpinned":
             case "thread.pin-reordered":
             case "thread.active-reordered":
+            case "thread.arranged":
             case "thread.tags-updated":
             case "thread.visited":
             case "thread.marked-unread":
@@ -3319,6 +3338,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             event.type !== "thread.unpinned" &&
             event.type !== "thread.pin-reordered" &&
             event.type !== "thread.active-reordered" &&
+            event.type !== "thread.arranged" &&
             event.type !== "thread.tags-updated" &&
             event.type !== "thread.visited" &&
             event.type !== "thread.visit-recorded" &&
@@ -6681,6 +6701,18 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         Effect.map((rows) => [...new Set(rows.map((row) => ThreadId.make(row.child_thread_id)))]),
         Effect.mapError(controlReadError(threadId)),
       );
+    const listArrangedChildThreadIds: ProjectionStoreV2Shape["listArrangedChildThreadIds"] = (
+      projectId,
+      parentThreadId,
+    ) =>
+      sql<{ readonly thread_id: string }>`SELECT thread_id
+        FROM orchestration_v2_projection_threads
+        WHERE project_id = ${projectId} AND deleted_at IS NULL AND archived_at IS NULL
+          AND json_extract(payload_json, '$.arrangedParentThreadId') = ${parentThreadId}
+        ORDER BY thread_id ASC`.pipe(
+        Effect.map((rows) => rows.map((row) => ThreadId.make(row.thread_id))),
+        Effect.mapError(controlReadError(parentThreadId)),
+      );
     const hasPendingDelegatedCompletion: ProjectionStoreV2Shape["hasPendingDelegatedCompletion"] =
       Effect.fn("ProjectionStore.hasPendingDelegatedCompletion")((childThreadId) =>
         sql`SELECT 1 FROM orchestration_v2_projection_subagents AS task
@@ -9781,6 +9813,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getSubagentCount: readOnReader(getSubagentCount),
       getRunCount: readOnReader(getRunCount),
       listAppOwnedChildThreadIds: readOnReader(listAppOwnedChildThreadIds),
+      listArrangedChildThreadIds: readOnReader(listArrangedChildThreadIds),
       hasPendingDelegatedCompletion: readOnReader(hasPendingDelegatedCompletion),
       getNextTurnItemOrdinal: readOnReader(getNextTurnItemOrdinal),
       getTurnItem: readOnReader(getTurnItem),

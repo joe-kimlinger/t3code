@@ -11,6 +11,7 @@ import {
   OrchestratorMcpDelegateTaskResult,
   OrchestratorMcpThreadInterruptResult,
   OrchestratorMcpThreadSendResult,
+  OrchestratorMcpThreadListResult,
   OrchestratorMcpThreadReadResult,
   ProjectId,
   ProviderDriverKind,
@@ -81,6 +82,7 @@ const cancellationPrompt = "Remain active until the parent cancels this delegate
 const queuedFollowupPrompt = "Complete the queued follow-up and return the final result.";
 const queuedFollowupResult = "Queued delegated follow-up completed.";
 const decodeThreadRead = Schema.decodeUnknownEffect(OrchestratorMcpThreadReadResult);
+const decodeThreadList = Schema.decodeUnknownEffect(OrchestratorMcpThreadListResult);
 const longFollowupResult = "Long delegated follow-up line. ".repeat(1_500);
 
 const decodeDelegateTaskResult = Schema.decodeUnknownEffect(OrchestratorMcpDelegateTaskResult);
@@ -809,6 +811,53 @@ describe("orchestrator MCP toolkit", () => {
             .filter(({ fields }) => fields.includes("runs") || fields.includes("contextTransfers"))
             .map(({ threadId }) => threadId),
         ).toEqual([delegated.childThreadId]);
+
+        // An agent's parent follows the user's current arrangement, read at call time.
+        const [firstParent, secondParent] = ["first", "second"].map((name) =>
+          ThreadId.make(`thread:mcp-arranged-${name}`),
+        );
+        for (const threadId of [firstParent!, secondParent!]) {
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make(`command:${threadId}:create`),
+            threadId,
+            projectId,
+            title: threadId,
+            modelSelection: codexSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: cwd,
+          });
+        }
+        const currentParent = invoke("t3_thread_list", { limit: 1 }).pipe(
+          Effect.flatMap((call) => decodeThreadList(call.structuredContent)),
+          Effect.map((list) => list.currentParentThreadId),
+        );
+        expect(yield* currentParent).toBeNull();
+        const arrange = (step: string, parent: ThreadId | null) =>
+          orchestrator.dispatch({
+            type: "thread.arrange",
+            commandId: CommandId.make(`command:mcp-arranged:${step}`),
+            threadId: parentThreadId,
+            parentThreadId: parent,
+          });
+        yield* arrange("nest", firstParent!);
+        expect(yield* currentParent).toBe(firstParent);
+        const ownRead = yield* decodeThreadRead(
+          (yield* invoke("t3_thread_read", { threadId: parentThreadId, limit: 1 }))
+            .structuredContent,
+        );
+        expect(ownRead.thread).toMatchObject({
+          parentThreadId: firstParent,
+          executionParentThreadId: null,
+        });
+        yield* arrange("move", secondParent!);
+        expect(yield* currentParent).toBe(secondParent);
+        yield* arrange("unnest", null);
+        expect(yield* currentParent).toBeNull();
       }).pipe(Effect.provide(layerTest));
     }),
   );

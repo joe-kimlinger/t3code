@@ -13,7 +13,7 @@ import {
   runRanAfter,
   usageLimitBlockedRun,
 } from "@t3tools/shared/orchestrationV2ThreadError";
-import { threadIssueKeysEqual } from "@t3tools/contracts";
+import { isListedThreadLineage, threadIssueKeysEqual } from "@t3tools/contracts";
 import { canonicalizeGitCafePullRequestUrl } from "@t3tools/source-control-definitions/registry";
 import { threadPullRequestsOf } from "../sourceControl/threadPullRequests.ts";
 import {
@@ -648,6 +648,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.unpin":
     case "thread.pin.reorder":
     case "thread.active.reorder":
+    case "thread.arrange":
     case "thread.tag.set":
     case "thread.visit":
     case "thread.mark-unread":
@@ -1886,6 +1887,58 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     projectionStore
       .findThread(threadId)
       .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
+
+  /**
+   * Why `thread` cannot be arranged under `parentThreadId`, or null. Arrangement is list
+   * organization only: same project, listed threads, no cycles.
+   */
+  const arrangementRefusal = Effect.fn("Orchestrator.arrangementRefusal")(function* (
+    thread: OrchestrationV2AppThread,
+    parentThreadId: ThreadId | null,
+  ) {
+    if (!isListedThreadLineage(thread.lineage)) {
+      return `Thread ${thread.id} is a subagent or side chat and cannot be arranged.`;
+    }
+    if (parentThreadId === null) return null;
+    if (parentThreadId === thread.id) return `Thread ${thread.id} cannot be nested under itself.`;
+    const parent = yield* findThread(parentThreadId);
+    if (parent === null || parent.deletedAt !== null) {
+      return `Thread ${parentThreadId} does not exist.`;
+    }
+    if (parent.archivedAt !== null) return `Thread ${parentThreadId} is archived.`;
+    if (!isListedThreadLineage(parent.lineage)) {
+      return `Thread ${parentThreadId} is a subagent or side chat and cannot hold threads.`;
+    }
+    if (parent.projectId !== thread.projectId) {
+      return `Thread ${parentThreadId} is in another project.`;
+    }
+    const visited = new Set<ThreadId>([parent.id]);
+    let ancestorId = parent.arrangedParentThreadId ?? null;
+    while (ancestorId !== null && !visited.has(ancestorId)) {
+      if (ancestorId === thread.id) {
+        return `Thread ${parentThreadId} is nested under ${thread.id}; nesting would form a cycle.`;
+      }
+      visited.add(ancestorId);
+      ancestorId = (yield* findThread(ancestorId))?.arrangedParentThreadId ?? null;
+    }
+    return null;
+  });
+
+  /** The nearest live, unarchived thread on the arranged chain starting at `threadId`. */
+  const liveArrangedAncestor = Effect.fn("Orchestrator.liveArrangedAncestor")(function* (
+    threadId: ThreadId | null,
+  ) {
+    const visited = new Set<ThreadId>();
+    let currentId = threadId;
+    while (currentId !== null && !visited.has(currentId)) {
+      visited.add(currentId);
+      const current = yield* findThread(currentId);
+      if (current === null) return null;
+      if (current.deletedAt === null && current.archivedAt === null) return current.id;
+      currentId = current.arrangedParentThreadId ?? null;
+    }
+    return null;
+  });
 
   /** Side chats live inside their parent, so deleting or archiving the parent takes them too. */
   const liveSideChatIds = Effect.fn("Orchestrator.liveSideChatIds")(
@@ -4031,13 +4084,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       lastVisitedAt: null,
       deletedAt: null,
     };
+    // A launcher that cannot hold the thread (another project, archived, a subagent) leaves it top level.
+    const arrangedParentThreadId =
+      command.arrangedParentThreadId !== undefined &&
+      (yield* arrangementRefusal(thread, command.arrangedParentThreadId)) === null
+        ? command.arrangedParentThreadId
+        : undefined;
 
     yield* emitEvent({
       type: "thread.created",
       threadId: command.threadId,
       providerInstanceId: command.modelSelection.instanceId,
       occurredAt: now,
-      payload: thread,
+      payload:
+        arrangedParentThreadId === undefined ? thread : { ...thread, arrangedParentThreadId },
     });
     if (command.importedNativeThread !== undefined) {
       yield* emitEvent({
@@ -4342,6 +4402,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.pin.reorder"
           | "thread.tag.set"
           | "thread.active.reorder"
+          | "thread.arrange"
           | "thread.mark-unread"
           | "thread.metadata.update"
           | "thread.pull-request.link"
@@ -4504,6 +4565,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         command.type === "thread.unpin" ||
         command.type === "thread.pin.reorder" ||
         command.type === "thread.active.reorder" ||
+        command.type === "thread.arrange" ||
         command.type === "thread.pull-request.sync") &&
       thread.archivedAt !== null
     ) {
@@ -4520,6 +4582,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         commandType: command.type,
         cause: `Thread ${command.threadId} is not pinned and cannot be reordered.`,
       });
+    }
+    if (command.type === "thread.arrange") {
+      const refusal = yield* arrangementRefusal(thread, command.parentThreadId);
+      if (refusal !== null) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: refusal,
+        });
+      }
     }
     if (
       command.type === "thread.active.reorder" &&
@@ -4797,6 +4869,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
     }
+    // The parent may have been archived or deleted meanwhile; its children moved up without this one.
+    const unarchivedArrangedParentThreadId =
+      command.type === "thread.unarchive" && thread.arrangedParentThreadId != null
+        ? yield* liveArrangedAncestor(thread.arrangedParentThreadId)
+        : null;
     let restoredUnsettledAt: DateTime.Utc | null | undefined;
     if (command.type === "thread.unsettle" && command.restoreUnsettledAt !== undefined) {
       const parsed =
@@ -4909,7 +4986,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             updatedAt: now,
           };
         case "thread.unarchive":
-          return { ...thread, archivedAt: null, updatedAt: now };
+          return {
+            ...thread,
+            archivedAt: null,
+            ...(thread.arrangedParentThreadId == null
+              ? {}
+              : {
+                  arrangedParentThreadId: unarchivedArrangedParentThreadId,
+                  arrangedOrderKey:
+                    unarchivedArrangedParentThreadId === thread.arrangedParentThreadId
+                      ? (thread.arrangedOrderKey ?? null)
+                      : null,
+                }),
+            updatedAt: now,
+          };
         case "thread.settle": {
           const wasPinned = thread.pinnedAt != null;
           const alreadySettled =
@@ -5018,6 +5108,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...thread,
             activeOrderKey: command.orderKey,
             updatedAt: thread.updatedAt,
+          };
+        }
+        case "thread.arrange": {
+          return {
+            ...thread,
+            arrangedParentThreadId: command.parentThreadId,
+            arrangedOrderKey: command.parentThreadId === null ? null : (command.orderKey ?? null),
           };
         }
         case "thread.tag.set": {
@@ -5489,6 +5586,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return "thread.pin-reordered" as const;
         case "thread.active.reorder":
           return "thread.active-reordered" as const;
+        case "thread.arrange":
+          return "thread.arranged" as const;
         case "thread.tag.set":
           return "thread.tags-updated" as const;
         case "thread.mark-unread":
@@ -15578,6 +15677,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.unpin":
       case "thread.pin.reorder":
       case "thread.active.reorder":
+      case "thread.arrange":
       case "thread.tag.set":
       case "thread.mark-unread":
       case "thread.pull-request.link":
@@ -16205,6 +16305,46 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ),
     );
 
+  // Children move up after the parent commits, each under its own lock. A crash in between
+  // leaves a dangling arranged parent, which readers treat as top level.
+  const promoteArrangedChildren = Effect.fn("Orchestrator.promoteArrangedChildren")(
+    function* (commandId: CommandId, threadId: ThreadId) {
+      const parent = yield* findThread(threadId);
+      if (parent === null) return;
+      const childIds = yield* projectionStore
+        .listArrangedChildThreadIds(parent.projectId, parent.id)
+        .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
+      if (childIds.length === 0) return;
+      const newParentThreadId = yield* liveArrangedAncestor(parent.arrangedParentThreadId ?? null);
+      for (const childId of childIds) {
+        yield* threadDispatch
+          .withLock(
+            childId,
+            dispatchWithReceiptEffect({
+              type: "thread.arrange",
+              commandId: CommandId.make(`${commandId}:arranged-child:${childId}`),
+              threadId: childId,
+              parentThreadId: newParentThreadId,
+            }),
+          )
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Failed to move an arranged child up", {
+                threadId: childId,
+                cause,
+              }),
+            ),
+          );
+      }
+    },
+    (effect, _commandId, threadId) =>
+      effect.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Failed to move arranged children up", { threadId, cause }),
+        ),
+      ),
+  );
+
   // dispatchWithReceiptEffect owns the dispatch span; this wrapper selects the thread locks.
   const dispatchWithReceipt = Effect.fnUntraced(function* (command: OrchestrationV2ServerCommand) {
     const dispatch = threadDispatch.withLock(
@@ -16241,9 +16381,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ),
         ),
       );
-      return yield* command.type === "thread.delete"
+      const result = yield* command.type === "thread.delete"
         ? threadDispatch.withDeletionLock(cascade)
         : cascade;
+      if (command.type !== "thread.unarchive") {
+        yield* promoteArrangedChildren(command.commandId, command.threadId);
+      }
+      return result;
     }
     // Taken before the lineage read, so a message whose read yields keeps its
     // place ahead of later messages to the same thread.

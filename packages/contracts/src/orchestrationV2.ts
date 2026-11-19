@@ -178,6 +178,18 @@ export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLin
 export const isListedThreadLineage = (lineage: OrchestrationV2AppThreadLineage): boolean =>
   lineage.relationshipToParent !== "subagent" && lineage.sideChat !== true;
 
+/**
+ * The thread an agent should treat as its parent. Listed threads follow the user's arrangement,
+ * which can change at any time; subagents and side chats keep their execution parent.
+ */
+export const effectiveParentThreadId = (thread: {
+  readonly lineage: OrchestrationV2AppThreadLineage;
+  readonly arrangedParentThreadId?: ThreadId | null | undefined;
+}): ThreadId | null =>
+  isListedThreadLineage(thread.lineage)
+    ? (thread.arrangedParentThreadId ?? null)
+    : thread.lineage.parentThreadId;
+
 export const OrchestrationV2ContextTransferType = Schema.Literals([
   "fork",
   "provider_handoff",
@@ -522,6 +534,10 @@ export const OrchestrationV2AppThread = Schema.Struct({
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Where the user arranged this thread in thread lists; independent of execution `lineage`. */
+  arrangedParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  /** Order among siblings under `arrangedParentThreadId`. */
+  arrangedOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Absent on threads written before tags existed; read as empty. */
   tags: Schema.optional(StoredThreadTags),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
@@ -2055,6 +2071,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.unpinned",
       "thread.pin-reordered",
       "thread.active-reordered",
+      "thread.arranged",
       "thread.tags-updated",
       "thread.visited",
       "thread.marked-unread",
@@ -2320,6 +2337,10 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Where the user arranged this thread in thread lists; independent of execution `lineage`. */
+  arrangedParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  /** Order among siblings under `arrangedParentThreadId`. */
+  arrangedOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Absent on threads written before tags existed; read as empty. */
   tags: Schema.optional(StoredThreadTags),
   lastVisitedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
@@ -3002,6 +3023,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.unpinned",
       "thread.pin-reordered",
       "thread.active-reordered",
+      "thread.arranged",
       "thread.tags-updated",
       "thread.visited",
       "thread.marked-unread",
@@ -3162,6 +3184,8 @@ export const OrchestrationV2Command = Schema.Union([
     linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
     /** Only the server sets this, with `linkOrigin`, for a linked environment's delegated task. */
     delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
+    /** Nests the new thread under this one in thread lists; ignored when it cannot be nested there. */
+    arrangedParentThreadId: Schema.optional(ThreadId),
     importedNativeThread: Schema.optional(
       Schema.Struct({
         ref: Schema.Struct({
@@ -3287,6 +3311,14 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     orderKey: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.arrange"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    /** null moves the thread to the top level. */
+    parentThreadId: Schema.NullOr(ThreadId),
+    orderKey: Schema.optional(TrimmedNonEmptyString),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.visit"),
