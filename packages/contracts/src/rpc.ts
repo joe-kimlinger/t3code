@@ -421,6 +421,17 @@ import {
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
+  AttentionActInput,
+  AttentionError,
+  AttentionPreferencesFile,
+  AttentionRerankInput,
+  AttentionRerankResult,
+  AttentionStreamEvent,
+  AttentionThreadAsk,
+  AttentionThreadAskInput,
+  AttentionWritePreferencesInput,
+} from "./attention.ts";
+import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
   ProjectCloneListEvent,
@@ -590,6 +601,14 @@ export const WS_METHODS = {
   serverReportClientActivity: "server.reportClientActivity",
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
+
+  attentionSubscribe: "attention.subscribe",
+  attentionAct: "attention.act",
+  attentionThreadAsk: "attention.threadAsk",
+  attentionReadPreferences: "attention.readPreferences",
+  attentionWritePreferences: "attention.writePreferences",
+  attentionResetLearning: "attention.resetLearning",
+  attentionRerank: "attention.rerank",
 
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -2212,6 +2231,48 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+const AttentionRpcError = Schema.Union([AttentionError, EnvironmentAuthorizationError]);
+
+const WsAttentionSubscribeRpc = Rpc.make(WS_METHODS.attentionSubscribe, {
+  payload: Schema.Struct({}),
+  success: AttentionStreamEvent,
+  error: AttentionRpcError,
+  stream: true,
+});
+
+const WsAttentionActRpc = Rpc.make(WS_METHODS.attentionAct, {
+  payload: AttentionActInput,
+  error: AttentionRpcError,
+});
+
+const WsAttentionThreadAskRpc = Rpc.make(WS_METHODS.attentionThreadAsk, {
+  payload: AttentionThreadAskInput,
+  success: AttentionThreadAsk,
+  error: AttentionRpcError,
+});
+
+const WsAttentionReadPreferencesRpc = Rpc.make(WS_METHODS.attentionReadPreferences, {
+  payload: Schema.Struct({}),
+  success: AttentionPreferencesFile,
+  error: AttentionRpcError,
+});
+
+const WsAttentionWritePreferencesRpc = Rpc.make(WS_METHODS.attentionWritePreferences, {
+  payload: AttentionWritePreferencesInput,
+  error: AttentionRpcError,
+});
+
+const WsAttentionResetLearningRpc = Rpc.make(WS_METHODS.attentionResetLearning, {
+  payload: Schema.Struct({}),
+  error: AttentionRpcError,
+});
+
+const WsAttentionRerankRpc = Rpc.make(WS_METHODS.attentionRerank, {
+  payload: AttentionRerankInput,
+  success: AttentionRerankResult,
+  error: AttentionRpcError,
+});
+
 const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -2301,6 +2362,13 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 ) {}
 
 export const WsRpcGroup = RpcGroup.make(
+  WsAttentionSubscribeRpc,
+  WsAttentionActRpc,
+  WsAttentionThreadAskRpc,
+  WsAttentionReadPreferencesRpc,
+  WsAttentionWritePreferencesRpc,
+  WsAttentionResetLearningRpc,
+  WsAttentionRerankRpc,
   WsIssuesListRpc,
   WsIssuesDetailRpc,
   WsIssuesCommentsRpc,

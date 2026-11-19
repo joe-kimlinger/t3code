@@ -55,6 +55,12 @@ import {
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
 import {
+  AttentionNowLimit,
+  AttentionSettings,
+  AttentionSettingsPatch,
+  DEFAULT_ATTENTION_NOW_LIMIT,
+} from "./attention.ts";
+import {
   CloudSpeechModelId,
   SpeechAcceleration,
   SpeechCorrectionCue,
@@ -556,6 +562,10 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   sidebarWorkingShelfEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** How many items the attention panel's Now section shows before "more". */
+  attentionNowLimit: AttentionNowLimit.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_ATTENTION_NOW_LIMIT)),
+  ),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -1475,6 +1485,9 @@ export const ServerSettings = Schema.Struct({
   snoozePresets: SnoozePresetSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SNOOZE_PRESETS)),
   ),
+  attention: AttentionSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(AttentionSettings)({}))),
+  ),
   /** Clients hide threads with these tags while `hideTaggedThreads` is on. Bad entries drop alone, so a hand edit cannot reset settings. */
   hiddenThreadTags: Schema.Array(Schema.Unknown).pipe(
     Schema.decodeTo(
@@ -1926,6 +1939,7 @@ export const ServerSettingsPatch = Schema.Struct({
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozePresets: Schema.optionalKey(SnoozePresetSettings),
+  attention: Schema.optionalKey(AttentionSettingsPatch),
   hiddenThreadTags: Schema.optionalKey(Schema.Array(Schema.String)),
   hideTaggedThreads: Schema.optionalKey(Schema.Boolean),
   guestSharingEnabled: Schema.optionalKey(Schema.Boolean),
@@ -2122,6 +2136,7 @@ export const ClientSettingsPatch = Schema.Struct({
   threadDetailsUsageEnabled: Schema.optionalKey(Schema.Boolean),
   threadDetailsItems: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   sidebarWorkingShelfEnabled: Schema.optionalKey(Schema.Boolean),
+  attentionNowLimit: Schema.optionalKey(AttentionNowLimit),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),
