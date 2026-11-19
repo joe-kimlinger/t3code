@@ -43,7 +43,13 @@ import {
   type EnvironmentQueryTarget,
 } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
-import { useComposerPathSearch, useDebouncedValue, useThreadSearch } from "~/state/queries";
+import {
+  useComposerPathSearch,
+  useDebouncedValue,
+  useLinkedFolderPathSearch,
+  useThreadSearch,
+} from "~/state/queries";
+import { linkedFolderPathMentions } from "./linkedFolderMentions.logic";
 import {
   matchesPullRequestQuery,
   rankPullRequestMatches,
@@ -58,6 +64,7 @@ import {
 } from "./composerSlashCommandSearch";
 
 const COMPOSER_PULL_REQUEST_LIST_LIMIT = 99;
+const LINKED_FOLDER_PATH_SEARCH_LIMIT = 12;
 const COMPOSER_PULL_REQUEST_RESULT_LIMIT = 12;
 const EMPTY_PULL_REQUEST_LIST_TARGETS: ReadonlyArray<EnvironmentQueryTarget<PullRequestListInput>> =
   [];
@@ -68,6 +75,7 @@ export function useComposerMenuItems({
   environmentId,
   linkedEnvironments,
   gitCwd,
+  linkedFolders,
   activeThreadId,
   pullRequestProjectId,
   pullRequestRepository,
@@ -88,6 +96,8 @@ export function useComposerMenuItems({
   readonly environmentId: EnvironmentId;
   readonly linkedEnvironments: ReadonlyMap<EnvironmentId, string>;
   readonly gitCwd: string | null;
+  /** The project's other folders as this thread works on them; `@` searches them too. */
+  readonly linkedFolders: ReadonlyArray<{ readonly path: string; readonly name: string }>;
   readonly activeThreadId: ThreadId | null;
   readonly pullRequestProjectId: ProjectId | null;
   readonly pullRequestRepository: string | null;
@@ -147,6 +157,15 @@ export function useComposerMenuItems({
       cwd: isPathTrigger ? gitCwd : null,
       query: isPathTrigger ? pathTriggerQuery : null,
     },
+    messages,
+  );
+  const linkedFolderEntries = useLinkedFolderPathSearch(
+    {
+      environmentId,
+      folders: linkedFolders,
+      query: isPathTrigger && gitCwd !== null ? pathTriggerQuery : null,
+    },
+    LINKED_FOLDER_PATH_SEARCH_LIMIT,
     messages,
   );
 
@@ -247,6 +266,20 @@ export function useComposerMenuItems({
           searchTarget: workspaceEntries.searchedTarget,
           label: basenameOfPath(entry.path),
           description: entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))),
+        })),
+        ...linkedFolderPathMentions(linkedFolderEntries.results).map((mention) => ({
+          id: `path:${mention.kind}:${mention.path}`,
+          type: "path" as const,
+          path: mention.path,
+          pathKind: mention.kind,
+          // Selection checks the target against the thread's own cwd.
+          searchTarget: {
+            environmentId,
+            cwd: gitCwd,
+            query: linkedFolderEntries.searchedQuery,
+          },
+          label: mention.label,
+          description: mention.description,
         })),
       ];
     }

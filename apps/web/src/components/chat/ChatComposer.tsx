@@ -22,6 +22,7 @@ import {
 } from "../../questionAttachments";
 import type {
   KeybindingCommand,
+  ThreadLinkedFolder,
   AssistantCitation,
   ResponseContextRecord,
   ChatAttachment as ContractChatAttachment,
@@ -432,6 +433,7 @@ export interface ChatComposerProps {
   getShortcutContext: (eventTarget: EventTarget | null) => ShortcutMatchContext;
   terminalOpen: boolean;
   gitCwd: string | null;
+  linkedFolders: ReadonlyArray<ThreadLinkedFolder>;
   pullRequestProjectId: ProjectId | null;
   pullRequestRepository: string | null;
   threadPullRequests: ReadonlyArray<ThreadPullRequestLink> | undefined;
@@ -1149,6 +1151,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     environmentId,
     linkedEnvironments,
     gitCwd,
+    linkedFolders: props.linkedFolders,
     activeThreadId,
     pullRequestProjectId,
     pullRequestRepository,

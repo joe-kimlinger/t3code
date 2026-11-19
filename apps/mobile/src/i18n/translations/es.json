@@ -3394,6 +3394,7 @@
   "82c158f932fbb0db": "Elige un proyecto con el filtro de arriba para gestionar su nombre, sus checkouts y su eliminación.",
   "fa38c677c3af4f00": "Este proyecto no tiene checkout en los entornos conectados seleccionados. Cambia el filtro de arriba.",
   "4614a422f1430cd7": "Nombre",
+  "eb32bab7c8c3a304": "Carpetas vinculadas",
   "89c5ab924f851b78": "Quitar checkout",
   "c165e95dd1b35bfd": "Esta sesión puede ver los proveedores de {environment}, pero no cambiar sus ajustes.",
   "d94f2f73976440c1": "No se pudo actualizar el inicio de sesión del proveedor.",
