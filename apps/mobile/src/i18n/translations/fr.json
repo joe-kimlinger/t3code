@@ -3449,6 +3449,7 @@
   "82c158f932fbb0db": "Choisissez un projet avec le filtre ci-dessus pour gérer son nom, ses checkouts et sa suppression.",
   "fa38c677c3af4f00": "Ce projet n’a aucun checkout dans les environnements connectés sélectionnés. Modifiez le filtre ci-dessus.",
   "4614a422f1430cd7": "Nom",
+  "eb32bab7c8c3a304": "Dossiers liés",
   "89c5ab924f851b78": "Supprimer le checkout",
   "c165e95dd1b35bfd": "Cette session peut afficher les fournisseurs de {environment} mais pas modifier leurs paramètres.",
   "d94f2f73976440c1": "Impossible de mettre à jour la connexion au fournisseur.",

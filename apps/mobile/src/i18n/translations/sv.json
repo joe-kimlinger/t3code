@@ -3455,6 +3455,7 @@
   "82c158f932fbb0db": "Välj ett projekt med filtret ovan för att hantera dess namn, utcheckningar och borttagning.",
   "fa38c677c3af4f00": "Projektet har ingen utcheckning i de valda anslutna miljöerna. Ändra filtret ovan.",
   "4614a422f1430cd7": "Namn",
+  "eb32bab7c8c3a304": "Länkade mappar",
   "89c5ab924f851b78": "Ta bort utcheckning",
   "c165e95dd1b35bfd": "Den här sessionen kan visa leverantörerna för {environment} men inte ändra deras inställningar.",
   "d94f2f73976440c1": "Kunde inte uppdatera leverantörsinloggningen.",

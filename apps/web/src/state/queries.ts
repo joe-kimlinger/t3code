@@ -361,6 +361,64 @@ export function useProjectPathSearch(
   };
 }
 
+const linkedFolderPathSearchAtom = Atom.family((key: string) => {
+  const targets = JSON.parse(key) as ReadonlyArray<
+    Parameters<typeof projectEnvironment.searchEntries>[0]
+  >;
+  return Atom.make((get) => targets.map((target) => get(projectEnvironment.searchEntries(target))));
+});
+
+/**
+ * Searches each linked folder beside the thread's own checkout. One atom holds every folder's
+ * search, so the folder count can change without changing the hooks a component calls.
+ */
+export function useLinkedFolderPathSearch(
+  input: {
+    readonly environmentId: EnvironmentId | null;
+    readonly folders: ReadonlyArray<{ readonly path: string; readonly name: string }>;
+    readonly query: string | null;
+  },
+  limit: number,
+  resolve: MessageResolver = m,
+) {
+  const query = useDebouncedValue(
+    input.query === null ? null : input.query.trim(),
+    PROJECT_PATH_SEARCH_DEBOUNCE_MS,
+  );
+  const fileAccess = useFilesystemReadAccess(input.environmentId, resolve);
+  const environmentId = input.environmentId;
+  const targets =
+    environmentId === null || query === null || !fileAccess.canReadFiles
+      ? []
+      : input.folders.map((folder) => ({
+          environmentId,
+          input: {
+            cwd: folder.path,
+            query: query.slice(0, 256).replace(/[\uD800-\uDBFF]$/, ""),
+            limit,
+          },
+        }));
+  const results = useAtomValue(
+    targets.length === 0
+      ? EMPTY_LINKED_FOLDER_SEARCH_ATOM
+      : linkedFolderPathSearchAtom(JSON.stringify(targets)),
+  );
+  return {
+    results: targets.map((target, index) => ({
+      folder: input.folders[index]!,
+      entries: AsyncResult.getOrElse(results[index]!, () => null)?.entries ?? EMPTY_PROJECT_ENTRIES,
+    })),
+    searchedQuery: query ?? "",
+    isPending: results.some((result) => result.waiting),
+  };
+}
+
+const EMPTY_LINKED_FOLDER_SEARCH_ATOM = Atom.make(
+  (): ReadonlyArray<
+    AsyncResult.AsyncResult<{ readonly entries: ReadonlyArray<ProjectEntry> }, unknown>
+  > => [],
+);
+
 export function useComposerPathSearch(
   target: ComposerPathSearchTarget,
   resolve: MessageResolver = m,

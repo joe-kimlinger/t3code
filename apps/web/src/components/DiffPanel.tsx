@@ -7,6 +7,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
   CHECKPOINT_DIFF_TRUNCATED_MARKER,
   type ReviewBranchCommitsResult,
@@ -115,6 +116,8 @@ import { useReviewFilePatches } from "./diffs/useReviewFilePatches";
 import { DiffFileLoadingBoundary } from "./diffs/DiffFileLoadingBoundary";
 import { DiffFileStatus } from "./diffs/DiffFileStatus";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
+import { useThreadRepoSelection } from "../threadRepoSelection";
+import { RepoSwitcher } from "./RepoSwitcher";
 import { projectCommitUrl } from "@t3tools/client-runtime/change-request-links";
 import { useOpenLink } from "../browser/useOpenLink";
 
@@ -260,7 +263,24 @@ export default function DiffPanel({
         }
       : null,
   );
-  const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
+  const primaryCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot ?? null;
+  const threadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
+  const repoSelection = useThreadRepoSelection({
+    threadKey,
+    project: activeProject,
+    thread: activeThread,
+    primaryCwd,
+  });
+  const diffSelection = useDiffPanelStore((state) =>
+    selectThreadDiffPanelSelection(state.byThreadKey, routeThreadRef),
+  );
+  const isGitSelection =
+    diffSelection.kind === "branch" ||
+    diffSelection.kind === "unstaged" ||
+    diffSelection.kind === "commit";
+  // Turn diffs come from checkpoints, which cover only the thread's own checkout.
+  const activeCwd =
+    (isGitSelection ? repoSelection.selected?.cwd : null) ?? primaryCwd ?? undefined;
   const serverConfig = useAtomValue(
     serverEnvironment.configValueAtom(activeThread?.environmentId ?? null),
   );
@@ -280,10 +300,9 @@ export default function DiffPanel({
   );
   const activeRepositoryRoot =
     gitStatusQuery.data?.workingTree.rootPath ??
-    (activeThread?.worktreePath ? undefined : activeProject?.repositoryIdentity?.rootPath);
-  const diffSelection = useDiffPanelStore((state) =>
-    selectThreadDiffPanelSelection(state.byThreadKey, routeThreadRef),
-  );
+    (activeThread?.worktreePath || activeCwd !== primaryCwd
+      ? undefined
+      : activeProject?.repositoryIdentity?.rootPath);
   const rememberedBaseRef = useDiffPanelStore((state) =>
     selectThreadBranchBaseRef(state, routeThreadRef),
   );
@@ -291,10 +310,6 @@ export default function DiffPanel({
   // Turn and git diffs name files from the repository root; a tool call's diff names them as
   // its provider recorded them, absolute or relative to the workspace.
   const diffPathRepositoryRoot = toolCallSelection ? undefined : activeRepositoryRoot;
-  const isGitSelection =
-    diffSelection.kind === "branch" ||
-    diffSelection.kind === "unstaged" ||
-    diffSelection.kind === "commit";
   const toolCallItems = useQuietThreadVisibleTurnItems(toolCallSelection ? routeThreadRef : null);
   const toolCallDetail = useTurnItemDetail(
     toolCallSelection && routeThreadRef
@@ -851,6 +866,7 @@ export default function DiffPanel({
   const headerRow = (
     <>
       <div className="@container/diff-refs flex min-w-0 flex-1 items-center gap-3 [-webkit-app-region:no-drag]">
+        <RepoSwitcher threadKey={threadKey} selection={repoSelection} />
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button size="xs" variant="secondary" />}

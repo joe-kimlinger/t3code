@@ -3449,6 +3449,7 @@
   "82c158f932fbb0db": "Escolha um projeto com o filtro acima para gerenciar o nome, os checkouts e a remoção dele.",
   "fa38c677c3af4f00": "Este projeto não tem checkout nos ambientes conectados selecionados. Altere o filtro acima.",
   "4614a422f1430cd7": "Nome",
+  "eb32bab7c8c3a304": "Pastas vinculadas",
   "89c5ab924f851b78": "Remover checkout",
   "c165e95dd1b35bfd": "Esta sessão pode ver os provedores de {environment}, mas não pode alterar as configurações deles.",
   "d94f2f73976440c1": "Não foi possível atualizar o login do provedor.",
