@@ -37,12 +37,14 @@ export const arrangedThreadKey = (thread: Pick<ArrangeableThread, "environmentId
  */
 export function arrangeThreads<T extends ArrangeableThread>(
   threads: readonly T[],
+  /** Threads listed at the top level whatever their parent. */
+  detachedKeys?: ReadonlySet<string>,
 ): ThreadArrangement<T> {
   const byKey = new Map<string, T>();
   for (const thread of threads) byKey.set(arrangedThreadKey(thread), thread);
   const parentKeys = new Map<string, string>();
   for (const [key, thread] of byKey) {
-    if (thread.arrangedParentThreadId == null) continue;
+    if (thread.arrangedParentThreadId == null || detachedKeys?.has(key)) continue;
     const parentKey = scopedThreadKey({
       environmentId: thread.environmentId,
       threadId: thread.arrangedParentThreadId,
@@ -87,6 +89,35 @@ export function arrangeThreads<T extends ArrangeableThread>(
     parentKeyOf: (key) => parentKeys.get(key) ?? null,
     childrenOf: (key) => sortedChildren.get(key) ?? NO_CHILDREN,
   };
+}
+
+/**
+ * Nests `threads` like `arrangeThreads`, but a thread whose top-level ancestor is parked
+ * (settled or snoozed) while it is not stays at the top level, so work that needs the user
+ * is never folded away inside a closed shelf.
+ */
+export function arrangeThreadsKeepingUnparked<T extends ArrangeableThread>(
+  threads: readonly T[],
+  isParked: (thread: T) => boolean,
+): ThreadArrangement<T> {
+  const arrangement = arrangeThreads(threads);
+  const byKey = new Map(threads.map((thread) => [arrangedThreadKey(thread), thread] as const));
+  const rootKeyCache = new Map<string, string>();
+  const rootKeyOf = (key: string): string => {
+    const cached = rootKeyCache.get(key);
+    if (cached !== undefined) return cached;
+    const parentKey = arrangement.parentKeyOf(key);
+    const rootKey = parentKey === null ? key : rootKeyOf(parentKey);
+    rootKeyCache.set(key, rootKey);
+    return rootKey;
+  };
+  const detached = new Set<string>();
+  for (const [key, thread] of byKey) {
+    if (arrangement.parentKeyOf(key) === null || isParked(thread)) continue;
+    const root = byKey.get(rootKeyOf(key));
+    if (root !== undefined && isParked(root)) detached.add(key);
+  }
+  return detached.size === 0 ? arrangement : arrangeThreads(threads, detached);
 }
 
 /** Each root followed by its descendants, depth first, skipping those under a collapsed thread. */

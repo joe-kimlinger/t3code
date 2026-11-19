@@ -16,6 +16,7 @@ import type {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import { effectiveParentThreadId, isListedThreadLineage } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
@@ -196,6 +197,7 @@ export interface EnvironmentThreadShell {
   readonly autoSettleDisabledAt?: string | null;
   readonly pinOrderKey: string | null;
   readonly activeOrderKey: string | null;
+  /** The listed thread this one nests under: its arrangement, else its fork source. */
   readonly arrangedParentThreadId: ThreadId | null;
   readonly arrangedOrderKey: string | null;
   readonly pullRequests: ReadonlyArray<import("@t3tools/contracts").ThreadPullRequestLink>;
@@ -357,7 +359,9 @@ export function presentThreadShell(
     autoSettleDisabledAt: nullableIso(thread.autoSettleDisabledAt ?? null),
     pinOrderKey: thread.pinOrderKey ?? null,
     activeOrderKey: thread.activeOrderKey ?? null,
-    arrangedParentThreadId: thread.arrangedParentThreadId ?? null,
+    arrangedParentThreadId: isListedThreadLineage(thread.lineage)
+      ? effectiveParentThreadId(thread)
+      : null,
     arrangedOrderKey: thread.arrangedOrderKey ?? null,
     ...(thread.lastVisitedAt === undefined
       ? {}

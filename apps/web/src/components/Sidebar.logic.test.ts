@@ -1203,7 +1203,17 @@ describe("Working shelf (beta)", () => {
           currentSiblingKeys: ["child"],
           target: { depth: 1, parentKey: "parent", siblingKeys: ["child", "other"] },
           orderKeysByKey: new Map([["child", "m"]]),
+          descendantKeys: new Set<string>(),
         };
+        // A thread cannot land under one of its own nested threads.
+        expect(
+          planSidebarNestDrop({
+            ...nestUnderParent,
+            activeKey: "parent",
+            descendantKeys: new Set(["child", "grandchild"]),
+            target: { depth: 2, parentKey: "grandchild", siblingKeys: ["parent"] },
+          }),
+        ).toBeNull();
         expect(planSidebarNestDrop(nestUnderParent)).toEqual([
           { key: "other", parentKey: "parent", orderKey: "t" },
         ]);
@@ -1220,6 +1230,7 @@ describe("Working shelf (beta)", () => {
             currentSiblingKeys: ["child"],
             target: { depth: 1, parentKey: "parent", siblingKeys: ["child"] },
             orderKeysByKey: new Map(),
+            descendantKeys: new Set(),
           }),
         ).toBeNull();
         const toTop = { depth: 0, parentKey: null, siblingKeys: [] };
@@ -1230,6 +1241,7 @@ describe("Working shelf (beta)", () => {
             currentSiblingKeys: [],
             target: toTop,
             orderKeysByKey: new Map(),
+            descendantKeys: new Set(),
           }),
         ).toEqual([{ key: "child", parentKey: null }]);
         expect(
@@ -1239,6 +1251,7 @@ describe("Working shelf (beta)", () => {
             currentSiblingKeys: [],
             target: toTop,
             orderKeysByKey: new Map(),
+            descendantKeys: new Set(),
           }),
         ).toBeNull();
       });

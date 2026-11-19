@@ -34,7 +34,7 @@ import {
   sortSettledThreads,
 } from "@t3tools/client-runtime/state/thread-sort";
 import {
-  arrangeThreads,
+  arrangeThreadsKeepingUnparked,
   arrangedThreadKey,
   flattenArrangedThreads,
 } from "@t3tools/client-runtime/state/thread-arrangement";
@@ -375,6 +375,29 @@ function sortThreadsForListV2<
   return sortActiveThreadsByOrderKey(threads);
 }
 
+/** Settled or snoozed, as the list shelves it; nested threads follow a parent only into those shelves when parked too. */
+function isParkedForList(
+  thread: EnvironmentThreadShell,
+  input: {
+    readonly now: string;
+    readonly settlementEnvironmentIds?: ReadonlySet<EnvironmentId> | undefined;
+    readonly snoozeEnvironmentIds?: ReadonlySet<EnvironmentId> | undefined;
+    readonly queuedThreadKeys?: ReadonlySet<string> | undefined;
+  },
+): boolean {
+  if (
+    (input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true) &&
+    effectiveSnoozed(thread, { now: input.now })
+  ) {
+    return true;
+  }
+  return (
+    (input.settlementEnvironmentIds?.has(thread.environmentId) ?? true) &&
+    thread.settledOverride === "settled" &&
+    input.queuedThreadKeys?.has(`${thread.environmentId}:${thread.id}`) !== true
+  );
+}
+
 export function getThreadListV2OrderedSection(input: {
   readonly threads: readonly EnvironmentThreadShell[];
   readonly section: "pinned" | "active";
@@ -389,7 +412,9 @@ export function getThreadListV2OrderedSection(input: {
     (thread) => thread.archivedAt === null && isListedThreadLineage(thread.lineage),
   );
   // Nested threads follow their parent, so they hold no place in a section's order.
-  const arrangement = arrangeThreads(listed);
+  const arrangement = arrangeThreadsKeepingUnparked(listed, (thread) =>
+    isParkedForList(thread, input),
+  );
   const threads = listed.filter((thread) => {
     if (arrangement.parentKeyOf(arrangedThreadKey(thread)) !== null) return false;
     if (
@@ -874,8 +899,11 @@ export function buildThreadListV2Items(input: {
     };
   }
 
-  // Nested threads render under their parent, in its section, so only top-level threads sort.
-  const arrangement = arrangeThreads(listedThreads);
+  // Nested threads render under their parent, in its section, so only top-level threads sort,
+  // except one a parked parent would hide while it still needs the user.
+  const arrangement = arrangeThreadsKeepingUnparked(listedThreads, (thread) =>
+    isParkedForList(thread, { ...input, queuedThreadKeys }),
+  );
   const isRoot = (thread: EnvironmentThreadShell) =>
     arrangement.parentKeyOf(arrangedThreadKey(thread)) === null;
   const withNested = (roots: readonly EnvironmentThreadShell[]) =>
