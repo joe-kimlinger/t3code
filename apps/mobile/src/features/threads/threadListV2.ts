@@ -33,6 +33,11 @@ import {
   sortPinnedThreadsByOrderKey,
   sortSettledThreads,
 } from "@t3tools/client-runtime/state/thread-sort";
+import {
+  arrangeThreads,
+  arrangedThreadKey,
+  flattenArrangedThreads,
+} from "@t3tools/client-runtime/state/thread-arrangement";
 import { isListedThreadLineage, type EnvironmentId, type ProjectId } from "@t3tools/contracts";
 import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import type { MenuAction } from "@react-native-menu/menu";
@@ -380,8 +385,13 @@ export function getThreadListV2OrderedSection(input: {
   readonly queuedThreadKeys?: ReadonlySet<string>;
 }): EnvironmentThreadShell[] {
   const queuedThreadKeys = input.queuedThreadKeys?.size ? input.queuedThreadKeys : undefined;
-  const threads = input.threads.filter((thread) => {
-    if (thread.archivedAt !== null || !isListedThreadLineage(thread.lineage)) return false;
+  const listed = input.threads.filter(
+    (thread) => thread.archivedAt === null && isListedThreadLineage(thread.lineage),
+  );
+  // Nested threads follow their parent, so they hold no place in a section's order.
+  const arrangement = arrangeThreads(listed);
+  const threads = listed.filter((thread) => {
+    if (arrangement.parentKeyOf(arrangedThreadKey(thread)) !== null) return false;
     if (
       (input.settlementEnvironmentIds?.has(thread.environmentId) ?? true) &&
       thread.settledOverride === "settled" &&
@@ -410,6 +420,8 @@ export function getThreadListV2OrderedSection(input: {
 
 export interface ThreadListV2Item {
   readonly thread: EnvironmentThreadShell;
+  /** 0 for a top-level row; nested rows follow their parent in its section. */
+  readonly depth?: number;
   readonly variant: "card" | "slim";
   readonly snoozed: boolean;
   readonly pinned: boolean;
@@ -511,6 +523,7 @@ export function threadListV2ListItemsAreEqual(
         previous.type === "v2-thread" &&
         previous.key === item.key &&
         previous.item.thread === item.item.thread &&
+        previous.item.depth === item.item.depth &&
         previous.item.variant === item.item.variant &&
         previous.item.snoozed === item.item.snoozed &&
         previous.item.pinned === item.item.pinned &&
@@ -613,7 +626,7 @@ export function buildThreadListV2ListItems(input: {
         ? input.snoozeLabelNow
         : undefined;
     const move =
-      item.variant === "card"
+      item.variant === "card" && (item.depth ?? 0) === 0
         ? input.moveAvailability?.get(`${item.thread.environmentId}:${item.thread.id}`)
         : undefined;
     return {
@@ -861,6 +874,27 @@ export function buildThreadListV2Items(input: {
     };
   }
 
+  // Nested threads render under their parent, in its section, so only top-level threads sort.
+  const arrangement = arrangeThreads(listedThreads);
+  const isRoot = (thread: EnvironmentThreadShell) =>
+    arrangement.parentKeyOf(arrangedThreadKey(thread)) === null;
+  const withNested = (roots: readonly EnvironmentThreadShell[]) =>
+    flattenArrangedThreads(roots, arrangement, () => false);
+  const rootsOf = (list: EnvironmentThreadShell[]) => {
+    const roots = list.filter(isRoot);
+    list.splice(0, list.length, ...roots);
+  };
+  rootsOf(pinned);
+  rootsOf(active);
+  rootsOf(working);
+  rootsOf(snoozed);
+  rootsOf(settled);
+  let selectedRootKey = input.selectedThreadKey ?? null;
+  for (let depth = 0; selectedRootKey !== null && depth < listedThreads.length; depth += 1) {
+    const parentKey = arrangement.parentKeyOf(selectedRootKey);
+    if (parentKey === null) break;
+    selectedRootKey = parentKey;
+  }
   const orderedActive = workingShelfEnabled
     ? sortInboxThreadsByReturn(active, input.inboxReturnAt)
     : applyPendingThreadOrder(sortThreadsForListV2(active), "active", pending);
@@ -869,7 +903,7 @@ export function buildThreadListV2Items(input: {
     (left, right) =>
       parseTimestampMs(left.snoozedUntil ?? "") - parseTimestampMs(right.snoozedUntil ?? ""),
   );
-  const selectedThreadKey = input.selectedThreadKey ?? null;
+  const selectedThreadKey = selectedRootKey;
   const visibleWorking =
     input.workingShelfExpanded === true
       ? orderedWorking
@@ -908,23 +942,23 @@ export function buildThreadListV2Items(input: {
         );
 
   const items: ThreadListV2Item[] = [];
-  for (const thread of applyPendingThreadOrder(
-    sortPinnedThreadsByOrderKey(pinned),
-    "pinned",
-    pending,
+  for (const { thread, depth } of withNested(
+    applyPendingThreadOrder(sortPinnedThreadsByOrderKey(pinned), "pinned", pending),
   )) {
     items.push({
       thread,
+      depth,
       variant: "card",
       snoozed: false,
-      pinned: true,
+      pinned: thread.pinnedAt != null,
       wokeAt: resolveThreadListV2WokeAt(thread, { now }),
       isLast: false,
     });
   }
-  for (const thread of orderedActive) {
+  for (const { thread, depth } of withNested(orderedActive)) {
     items.push({
       thread,
+      depth,
       variant: "card",
       snoozed: false,
       pinned: false,
@@ -933,9 +967,10 @@ export function buildThreadListV2Items(input: {
     });
   }
   const workingShelfHeaderIndex = orderedWorking.length > 0 ? items.length : null;
-  for (const thread of visibleWorking) {
+  for (const { thread, depth } of withNested(visibleWorking)) {
     items.push({
       thread,
+      depth,
       variant: "card",
       snoozed: false,
       pinned: false,
@@ -944,20 +979,22 @@ export function buildThreadListV2Items(input: {
     });
   }
   const snoozedShelfHeaderIndex = orderedSnoozed.length > 0 ? items.length : null;
-  for (const thread of visibleSnoozed) {
+  for (const { thread, depth } of withNested(visibleSnoozed)) {
     items.push({
       thread,
+      depth,
       variant: "slim",
-      snoozed: true,
+      snoozed: depth === 0 || effectiveSnoozed(thread, { now }),
       pinned: false,
       wokeAt: null,
       isLast: false,
     });
   }
   const settledShelfHeaderIndex = settledTotal > 0 ? items.length : null;
-  for (const thread of visibleSettled) {
+  for (const { thread, depth } of withNested(visibleSettled)) {
     items.push({
       thread,
+      depth,
       variant: "slim",
       snoozed: false,
       pinned: false,

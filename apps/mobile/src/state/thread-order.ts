@@ -17,6 +17,9 @@ import { queuedThreadKeysAtom } from "./use-thread-outbox";
 
 export const threadArrangementOpenAtom = Atom.make(false).pipe(Atom.keepAlive);
 
+/** The thread whose "Move under…" picker is open, by scoped thread key. */
+export const threadMoveUnderKeyAtom = Atom.make<string | null>(null).pipe(Atom.keepAlive);
+
 export const threadDropBusyAtom = Atom.make(false).pipe(Atom.keepAlive);
 
 export const pendingThreadOrderAtom = Atom.make<PendingThreadOrder | null>(null).pipe(

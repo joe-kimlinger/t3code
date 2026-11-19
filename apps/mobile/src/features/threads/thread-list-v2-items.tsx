@@ -11,7 +11,7 @@ import {
 import { RowPressable } from "../../components/ui/RowPressable";
 import { CustomSnoozeSheet } from "./CustomSnoozeSheet";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { threadArrangementOpenAtom } from "../../state/thread-order";
+import { threadArrangementOpenAtom, threadMoveUnderKeyAtom } from "../../state/thread-order";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useVisibleSecondClock } from "./use-visible-second-clock";
@@ -744,6 +744,8 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
 
 export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly thread: EnvironmentThreadShell;
+  /** 0 for a top-level row. */
+  readonly depth?: number;
   readonly variant: "card" | "slim";
   readonly hasQueuedMessages?: boolean;
   readonly snoozed?: boolean;
@@ -1015,6 +1017,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               image: "arrow.down",
               attributes: { disabled: props.canMoveDown !== true },
             } satisfies MenuAction,
+            {
+              id: "move-under",
+              title: gt("Move under…", { $context: "nest this thread under another" }),
+              image: "list.bullet.indent",
+            },
           ]
         : [],
     [gt, props.canMoveDown, props.canMoveUp, props.reorderSupported],
@@ -1216,6 +1223,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "auto-settle:enabled") handleSetAutoSettle(true);
       if (nativeEvent.event === "auto-settle:disabled") handleSetAutoSettle(false);
       if (nativeEvent.event === "arrange") appAtomRegistry.set(threadArrangementOpenAtom, true);
+      if (nativeEvent.event === "move-under") {
+        appAtomRegistry.set(threadMoveUnderKeyAtom, `${thread.environmentId}:${thread.id}`);
+      }
       if (nativeEvent.event === "move-up") handleMoveUp();
       if (nativeEvent.event === "move-down") handleMoveDown();
       if (nativeEvent.event === "archive") handleArchive();
@@ -1753,11 +1763,16 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       </RowPressable>
     );
 
+  // Deep trees keep a readable title width by capping the indent.
+  const nestIndent =
+    (props.depth ?? 0) > 0 ? { paddingLeft: Math.min(props.depth ?? 0, 4) * 14 } : undefined;
   if (!canOperateThread)
-    return <View style={rowAppearance.swipeContainerStyle}>{rowContent(() => {})}</View>;
+    return (
+      <View style={[rowAppearance.swipeContainerStyle, nestIndent]}>{rowContent(() => {})}</View>
+    );
 
   return (
-    <View collapsable={false}>
+    <View collapsable={false} style={nestIndent}>
       {customSnoozeOpen && (
         <CustomSnoozeSheet onClose={() => setCustomSnoozeOpen(false)} onSnooze={handleSnooze} />
       )}
