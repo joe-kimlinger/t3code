@@ -7,7 +7,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 
-import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 
 import type { ComposerThreadTarget, DraftId } from "../../composerDraftStore";
@@ -37,7 +37,7 @@ import { resolveThreadDetailsVisibility, THREAD_DETAILS_ITEMS } from "./threadDe
 import { useClientSettings } from "../../hooks/useSettings";
 import { useProject, useQuietThreadShell, useServerConfigs } from "../../state/entities";
 import { useThreadRepoSelection } from "../../threadRepoSelection";
-import { RepoSwitcher } from "../RepoSwitcher";
+import { ThreadRepositoriesSection } from "./ThreadRepositoriesSection";
 import { ThreadDetailsThreadPrRows } from "./ThreadDetailsPrRows";
 import { cn } from "../../lib/utils";
 import { SlidersHorizontalIcon } from "lucide-react";
@@ -106,9 +106,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   const project = useProject(scopeProjectRef(props.environmentId, props.projectId));
   const serverConfig = useServerConfigs().get(props.environmentId);
   const threadShell = useQuietThreadShell(props.isServerThread ? activeThreadRef : null);
-  const threadKey = props.isServerThread ? scopedThreadKey(activeThreadRef) : null;
   const repoSelection = useThreadRepoSelection({
-    threadKey,
+    threadRef: props.isServerThread ? activeThreadRef : null,
     project,
     thread: threadShell,
     primaryCwd: props.gitCwd,
@@ -244,6 +243,15 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 </ThreadDetailsSection>
               ) : null}
 
+              {props.isServerThread && (show.branch || show.git) ? (
+                <ThreadRepositoriesSection
+                  environmentId={props.environmentId}
+                  threadRef={activeThreadRef}
+                  selection={repoSelection}
+                  separated={density === "full"}
+                />
+              ) : null}
+
               {show.branch || show.pullRequests || show.git ? (
                 <ThreadDetailsSection
                   headingId="thread-details-version-control-heading"
@@ -252,7 +260,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   separated={density === "full"}
                 >
                   <div className="flex flex-col">
-                    <RepoSwitcher threadKey={threadKey} selection={repoSelection} />
                     {show.branch && !linkedRepoSelected ? (
                       <BranchToolbar layout="panel" panelSection="branch" {...branchToolbarProps} />
                     ) : null}
