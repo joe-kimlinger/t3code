@@ -32,6 +32,8 @@ function makeThread(input: {
   readonly now: DateTime.Utc;
   readonly worktreePath: string | null;
   readonly runtimeMode?: RuntimeMode;
+  readonly branch?: string;
+  readonly linkedWorktrees?: OrchestrationV2AppThread["linkedWorktrees"];
 }): OrchestrationV2AppThread {
   const threadId = ThreadId.make("thread:runtime-policy");
   return {
@@ -44,8 +46,9 @@ function makeThread(input: {
     modelSelection,
     runtimeMode: input.runtimeMode ?? "full-access",
     interactionMode: "default",
-    branch: null,
+    branch: input.branch ?? null,
     worktreePath: input.worktreePath,
+    ...(input.linkedWorktrees === undefined ? {} : { linkedWorktrees: input.linkedWorktrees }),
     activeProviderThreadId: null,
     lineage: {
       parentThreadId: null,
@@ -101,6 +104,7 @@ const layerWithPolicy = (policy?: ManagedPolicySummary) =>
             defaultThreadEnvMode: null,
             hasCustomTitle: false,
             autoPull: false,
+            additionalRoots: ["/linked/api", "/linked/docs"],
             faviconPath: null,
             projectIcon: null,
             scripts: [],
@@ -137,6 +141,54 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
       assert.equal(acpPermissionDisposition(yield* resolve("auto-accept-edits"), request), "ask");
       assert.equal(acpPermissionDisposition(yield* resolve("full-access"), request), "allow");
     }),
+  );
+
+  it.effect(
+    "gives local threads the linked folders and worktree threads their linked worktrees",
+    () =>
+      Effect.gen(function* () {
+        const policy = yield* RuntimePolicy.RuntimePolicyV2;
+        const now = yield* DateTime.now;
+        const local = yield* policy.resolve({
+          thread: makeThread({ now, worktreePath: null }),
+          modelSelection,
+        });
+        assert.equal(local.cwd, "/project-root");
+        assert.deepEqual(local.additionalDirectories, [
+          { path: "/linked/api", name: "api" },
+          { path: "/linked/docs", name: "docs" },
+        ]);
+
+        const linkedWorktrees = [
+          { root: "/linked/api", worktreePath: "/worktrees/api/feature", branch: "feature" },
+          // Unlinked from the project since the thread started: no longer passed on.
+          { root: "/linked/gone", worktreePath: "/worktrees/gone/feature", branch: "feature" },
+        ];
+        const worktree = yield* policy.resolve({
+          thread: makeThread({
+            now,
+            worktreePath: "/worktrees/project/feature",
+            branch: "feature",
+            linkedWorktrees,
+          }),
+          modelSelection,
+        });
+        assert.equal(worktree.cwd, "/worktrees/project/feature");
+        assert.deepEqual(worktree.additionalDirectories, [
+          { path: "/worktrees/api/feature", name: "api" },
+          { path: "/linked/docs", name: "docs" },
+        ]);
+
+        // Back in the project folder, a recorded linked worktree no longer applies.
+        const returned = yield* policy.resolve({
+          thread: makeThread({ now, worktreePath: null, linkedWorktrees }),
+          modelSelection,
+        });
+        assert.deepEqual(
+          returned.additionalDirectories?.map((directory) => directory.path),
+          ["/linked/api", "/linked/docs"],
+        );
+      }),
   );
 
   it.effect("runs a mode the provider does not offer in Supervised", () =>
