@@ -42,6 +42,7 @@ import {
   AlarmClockOffIcon,
   ArrowRightLeftIcon,
   CheckIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
@@ -100,6 +101,7 @@ import {
   withoutRemovedCheckout,
   useSidebarRowSubscriptionLease,
   setFileDragActive,
+  SIDEBAR_MAX_INDENT_DEPTH,
 } from "../Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
 import {
@@ -556,6 +558,13 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
   ),
 };
 
+const NESTED_DOT_CLASS_NAME = {
+  attention: "bg-warning",
+  failed: "bg-error",
+  unread: "bg-success",
+  working: "bg-info",
+} as const;
+
 const TOP_STATUS_ICONS = {
   working: CircleDashedIcon,
   waiting: CircleDotDashedIcon,
@@ -586,6 +595,15 @@ type SidebarThreadRowProps = {
   sortable?: SortableThreadRowBag | undefined;
   dropVerb: SidebarDropVerb | null;
   dragOverPinned: boolean;
+  /** 0 for a top-level row. */
+  nestingDepth?: number;
+  nestedChildCount?: number;
+  nestedChildrenCollapsed?: boolean;
+  /** The most urgent state among nested threads a collapsed row hides. */
+  nestedChildrenDot?: "attention" | "failed" | "unread" | "working" | null;
+  /** A drag in progress would nest the dragged thread under this row. */
+  isNestDropTarget?: boolean;
+  onToggleNestedChildren?: (threadKey: string) => void;
   sweepAction: SidebarSweepAction | null;
   snoozeWakeLabelText: string | null;
   wokeAt: string | null;
@@ -1009,6 +1027,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   const rowSurfaceClassName = cn(
     "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+    props.isNestDropTarget && "ring-2 ring-inset ring-primary/60",
     variantAction === "unsettle" &&
       !props.isActive &&
       "[&:not(:hover):not(:focus-within)_*:not(.live-activity-focus_*)]:text-secondary-label",
@@ -1030,10 +1049,58 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
   );
   const sortable = props.sortable;
+  const nestingDepth = props.nestingDepth ?? 0;
+  const nestingIndent =
+    nestingDepth > 0
+      ? { paddingInlineStart: `${Math.min(nestingDepth, SIDEBAR_MAX_INDENT_DEPTH) * 0.875}rem` }
+      : undefined;
+  const nestedChildCount = props.nestedChildCount ?? 0;
+  const { onToggleNestedChildren } = props;
+  const nestedToggle =
+    nestedChildCount > 0 && onToggleNestedChildren ? (
+      <button
+        type="button"
+        aria-expanded={!props.nestedChildrenCollapsed}
+        aria-label={
+          props.nestedChildrenCollapsed
+            ? gt(
+                "{count, plural, one {Show {count} nested thread} other {Show {count} nested threads}}",
+                { count: nestedChildCount },
+              )
+            : gt(
+                "{count, plural, one {Hide {count} nested thread} other {Hide {count} nested threads}}",
+                { count: nestedChildCount },
+              )
+        }
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggleNestedChildren(threadKey);
+        }}
+        className="inline-flex h-4 shrink-0 cursor-pointer items-center gap-0.5 rounded-sm px-0.5 text-2xs tabular-nums text-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
+        <ChevronRightIcon
+          aria-hidden
+          className={cn("size-3 shrink-0", !props.nestedChildrenCollapsed && "rotate-90")}
+        />
+        {props.nestedChildrenCollapsed ? nestedChildCount : null}
+        {props.nestedChildrenCollapsed && props.nestedChildrenDot ? (
+          <span
+            aria-hidden
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              NESTED_DOT_CLASS_NAME[props.nestedChildrenDot],
+            )}
+          />
+        ) : null}
+      </button>
+    ) : null;
   const sortableRootProps = sortable
     ? {
         ref: sortable.setNodeRef,
         style: {
+          ...nestingIndent,
           transform: CSS.Translate.toString(sortable.transform),
           transition: sortable.transition,
           // A zero-height boundary also makes dnd-kit scale the source to
@@ -1045,7 +1112,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         },
         ...sortable.listeners,
       }
-    : {};
+    : nestingIndent === undefined
+      ? {}
+      : { style: nestingIndent };
   const destinationVerb = sortable?.isDragging
     ? props.dropVerb
     : props.sweepAction === "unsnooze"
@@ -1382,6 +1451,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               )}
               {draftIndicator}
               {title}
+              {nestedToggle}
               {multiline ? titleLineIcons : null}
               {pinIndicator}
               {multiline ? null : terminalStatusIcon}
@@ -1571,6 +1641,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             )}
           >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
+              {nestedToggle}
               {draftIndicator}
               {props.project ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />

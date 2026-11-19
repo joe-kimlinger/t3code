@@ -23,6 +23,8 @@ import {
   shouldRecedeSidebarThread,
   sortInboxThreadsByReturn,
   resolveSidebarDropTarget,
+  resolveSidebarNestTarget,
+  planSidebarNestDrop,
   planSidebarThreadDrop,
   resolveSidebarReorderableThreadKeys,
   sortPinnedThreadsForSidebar,
@@ -1132,10 +1134,11 @@ describe("Working shelf (beta)", () => {
 
   describe("dragging", () => {
     const marker = (name: SidebarListMarker): SidebarListItem => ({ kind: "marker", marker: name });
-    const row = (key: string, section: SidebarSection): SidebarListItem => ({
+    const row = (key: string, section: SidebarSection, depth = 0): SidebarListItem => ({
       kind: "thread",
       key,
       section,
+      depth,
     });
     const items: readonly SidebarListItem[] = [
       marker("pinned-header"),
@@ -1148,6 +1151,98 @@ describe("Working shelf (beta)", () => {
       marker("settled-header"),
       row("s1", "settled"),
     ];
+
+    describe("nesting", () => {
+      const tree: readonly SidebarListItem[] = [
+        marker("pinned-header"),
+        marker("pinned-divider"),
+        row("parent", "active"),
+        row("child", "active", 1),
+        row("other", "active"),
+        marker("settled-header"),
+        row("s1", "settled"),
+      ];
+
+      it("indents under the row above, keeps a slot between a parent and its child nested, and un-nests at the left", () => {
+        expect(resolveSidebarNestTarget(tree, "other", "other", 1)).toEqual({
+          depth: 1,
+          parentKey: "parent",
+          siblingKeys: ["child", "other"],
+        });
+        // Two levels right of a depth-0 row still nests only one level under it.
+        expect(resolveSidebarNestTarget(tree, "other", "other", 3)?.depth).toBe(2);
+        // A row dropped between a parent and its first child becomes that child's sibling.
+        expect(resolveSidebarNestTarget(tree, "other", "child", 0)).toEqual({
+          depth: 1,
+          parentKey: "parent",
+          siblingKeys: ["other", "child"],
+        });
+        expect(resolveSidebarNestTarget(tree, "child", "child", -1)).toEqual({
+          depth: 0,
+          parentKey: null,
+          siblingKeys: [],
+        });
+        // A section boundary above the slot has nothing to nest under.
+        expect(resolveSidebarNestTarget(tree, "s1", "s1", 1)?.depth).toBe(0);
+        // Nested rows never enter a section order; the dragged one does once it leaves its parent.
+        expect(resolveSidebarDropTarget(tree, "other", "parent")?.activeOrder).toEqual([
+          "other",
+          "parent",
+        ]);
+        expect(resolveSidebarDropTarget(tree, "child", "other")?.activeOrder).toEqual([
+          "parent",
+          "other",
+          "child",
+        ]);
+      });
+
+      it("plans arrangement writes only when the nesting changes", () => {
+        const nestUnderParent = {
+          activeKey: "other",
+          currentParentKey: null,
+          currentSiblingKeys: ["child"],
+          target: { depth: 1, parentKey: "parent", siblingKeys: ["child", "other"] },
+          orderKeysByKey: new Map([["child", "m"]]),
+        };
+        expect(planSidebarNestDrop(nestUnderParent)).toEqual([
+          { key: "other", parentKey: "parent", orderKey: "t" },
+        ]);
+        // Keyless siblings get spread keys so the new position persists.
+        expect(
+          planSidebarNestDrop({ ...nestUnderParent, orderKeysByKey: new Map() })?.map(
+            (write) => write.key,
+          ),
+        ).toEqual(["other", "child"]);
+        expect(
+          planSidebarNestDrop({
+            activeKey: "child",
+            currentParentKey: "parent",
+            currentSiblingKeys: ["child"],
+            target: { depth: 1, parentKey: "parent", siblingKeys: ["child"] },
+            orderKeysByKey: new Map(),
+          }),
+        ).toBeNull();
+        const toTop = { depth: 0, parentKey: null, siblingKeys: [] };
+        expect(
+          planSidebarNestDrop({
+            activeKey: "child",
+            currentParentKey: "parent",
+            currentSiblingKeys: [],
+            target: toTop,
+            orderKeysByKey: new Map(),
+          }),
+        ).toEqual([{ key: "child", parentKey: null }]);
+        expect(
+          planSidebarNestDrop({
+            activeKey: "other",
+            currentParentKey: null,
+            currentSiblingKeys: [],
+            target: toTop,
+            orderKeysByKey: new Map(),
+          }),
+        ).toBeNull();
+      });
+    });
 
     it("never drops into the Working shelf, and keeps it out of the inbox order", () => {
       expect(resolveSidebarDropTarget(items, "a1", "w1")).toBeNull();
