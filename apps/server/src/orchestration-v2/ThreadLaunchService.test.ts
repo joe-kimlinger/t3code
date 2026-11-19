@@ -2961,6 +2961,60 @@ it.effect("stops an in-flight branch rename when tracked setup is cancelled", ()
   }),
 );
 
+it.effect("deletes renamed linked branches under their new name when setup is cancelled", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const fixture = yield* fileSystem.makeTempDirectoryScoped({ prefix: "launch-linked-cancel-" });
+    const roots = [`${fixture}/api`, `${fixture}/web`];
+    for (const root of roots) yield* fileSystem.makeDirectory(root);
+    const realRoots = yield* Effect.forEach(roots, (root) => fileSystem.realPath(root));
+    const worktreeOf = (cwd: string) =>
+      cwd === roots[0] ? "/wt/api" : cwd === roots[1] ? "/wt/web" : "/repo-worktrees/feature";
+    const secondRenameStarted = yield* Deferred.make<void>();
+    const finishSecondRename = yield* Deferred.make<void>();
+    const harness = makeHarness({
+      additionalRoots: roots,
+      git: {
+        repositoryRoot: (cwd) => Effect.succeed(realRoots[roots.indexOf(cwd)] ?? null),
+      },
+      createWorktree: (input) =>
+        Effect.succeed({
+          worktree: { path: worktreeOf(input.cwd), refName: input.newRefName, headSha: "abc" },
+        } as never),
+      renameBranch: (input) =>
+        input.cwd === "/wt/web"
+          ? Deferred.succeed(secondRenameStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(finishSecondRename)),
+              Effect.as({ branch: input.newBranch }),
+            )
+          : Effect.succeed({ branch: input.newBranch }),
+      runSetup: () => Effect.never,
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const tracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "launch:linked-cancel",
+          thread: "thread:linked-cancel",
+          message: "Start",
+          workspace: { type: "worktree", baseRef: "main" },
+        }),
+      );
+      yield* Deferred.await(secondRenameStarted);
+      const cancelling = yield* tracker
+        .cancel(launched.threadId)
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.succeed(finishSecondRename, undefined);
+      yield* Fiber.join(cancelling);
+      const deleted = (cwd: string) =>
+        harness.deleteLocalBranch.mock.calls.find(([input]) => input.cwd === cwd)?.[0].refName;
+      assert.equal(deleted(roots[0]!), "generated-branch");
+      assert.equal(deleted(roots[1]!), "generated-branch");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.effect("starts the agent of a new worktree thread only after its branch is renamed", () =>
   Effect.gen(function* () {
     const branchNameStarted = yield* Deferred.make<void>();
@@ -3018,11 +3072,19 @@ it.effect("makes a worktree on the thread's branch in each linked git repository
     const fixture = yield* fileSystem.makeTempDirectoryScoped({ prefix: "launch-linked-" });
     const api = `${fixture}/api`;
     const notes = `${fixture}/notes`;
-    yield* fileSystem.makeDirectory(`${api}/.git`, { recursive: true });
-    yield* fileSystem.makeDirectory(notes);
+    const monorepo = `${fixture}/monorepo`;
+    const pkg = `${monorepo}/packages/web`;
+    for (const folder of [api, notes, pkg]) {
+      yield* fileSystem.makeDirectory(folder, { recursive: true });
+    }
+    const repositoryRoots = new Map([
+      [api, yield* fileSystem.realPath(api)],
+      [pkg, yield* fileSystem.realPath(monorepo)],
+    ]);
     const renamed = yield* Deferred.make<void>();
     const harness = makeHarness({
-      additionalRoots: [api, notes],
+      additionalRoots: [api, notes, pkg],
+      git: { repositoryRoot: (cwd) => Effect.succeed(repositoryRoots.get(cwd) ?? null) },
       createWorktree: (input) =>
         Effect.succeed({
           worktree: {
@@ -3063,11 +3125,16 @@ it.effect("makes a worktree on the thread's branch in each linked git repository
         baseRefName: "refs/remotes/origin/main",
         path: null,
       });
-      assert.notInclude(
-        harness.createWorktree.mock.calls.map(([input]) => input.cwd),
-        notes,
-        "a plain folder is used as it is",
+      const worktreeCwds = harness.createWorktree.mock.calls.map(([input]) => input.cwd);
+      assert.notInclude(worktreeCwds, notes, "a plain folder is used as it is");
+      assert.notInclude(worktreeCwds, pkg, "a folder inside another repository gets no worktree");
+      const tracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+      const warned = yield* tracker.stream(launched.threadId).pipe(
+        Stream.map((snapshot) => snapshot?.stages.find((stage) => stage.id === "checkout")),
+        Stream.filter((stage) => stage?.status === "warning"),
+        Stream.runHead,
       );
+      assert.include(Option.getOrThrow(warned)?.detail ?? "", "web uses the folder itself");
       assert.include(
         harness.renameBranch.mock.calls.map(([input]) => input.cwd),
         "/api-worktrees/feature",

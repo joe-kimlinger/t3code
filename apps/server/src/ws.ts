@@ -3251,6 +3251,7 @@ export const layerWsRpc = (
           gitWorkflow.createWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         [WS_METHODS.vcsRemoveWorktree]: (input) =>
           gitWorkflow.removeWorktree(input).pipe(
+            Effect.tap(() => storageCleanup.removeLinkedWorktreesBeside(input.path)),
             Effect.tap(() => refreshGitStatus(input.cwd)),
             // Subscribers of the removed checkout learn it is no longer a repository.
             Effect.tap(() =>

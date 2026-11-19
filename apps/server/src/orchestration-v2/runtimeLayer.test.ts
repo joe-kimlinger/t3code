@@ -3936,6 +3936,64 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("gives a thread that joins a worktree the linked worktrees made beside it", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projectId = ProjectId.make("runtime-layer-joined-worktree-project");
+      yield* seedProject({
+        projectId,
+        title: "Joined worktree",
+        workspaceRoot: "/workspace/joined",
+        defaultModelSelection: null,
+        createdAt: "2026-09-07T00:00:00.000Z",
+      });
+      const linkedWorktrees = [
+        { root: "/workspace/api", worktreePath: "/tmp/joined-api", branch: "feature/joined" },
+      ];
+      const create = (id: string, worktreePath: string | null) =>
+        orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`runtime-layer-joined-create-${id}`),
+          threadId: ThreadId.make(`runtime-layer-joined-${id}`),
+          projectId,
+          title: id,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: worktreePath === null ? null : "feature/joined",
+          worktreePath,
+        });
+      const linkedOf = (id: string) =>
+        orchestrator
+          .getThreadProjection(ThreadId.make(`runtime-layer-joined-${id}`))
+          .pipe(Effect.map((projection) => projection.thread.linkedWorktrees));
+      yield* create("owner", null);
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("runtime-layer-joined-owner-workspace"),
+        threadId: ThreadId.make("runtime-layer-joined-owner"),
+        branch: "feature/joined",
+        worktreePath: "/tmp/joined",
+        linkedWorktrees,
+      });
+      // As create_threads and existing-worktree launches do.
+      yield* create("child", "/tmp/joined");
+      assert.deepEqual(yield* linkedOf("child"), linkedWorktrees);
+      // As a handoff into an existing worktree does.
+      yield* create("local", null);
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("runtime-layer-joined-local-handoff"),
+        threadId: ThreadId.make("runtime-layer-joined-local"),
+        branch: "feature/joined",
+        worktreePath: "/tmp/joined",
+      });
+      assert.deepEqual(yield* linkedOf("local"), linkedWorktrees);
+    }),
+  );
+
   it.effect("keeps the branch pull request when linking another pull request", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;

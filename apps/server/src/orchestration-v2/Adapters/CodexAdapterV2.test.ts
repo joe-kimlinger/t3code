@@ -262,6 +262,22 @@ describe("CodexAdapterV2 runtime policy", () => {
         auto.additionalContext?.t3_code_linked_folders?.value ?? "",
         "- api: /work/api",
       );
+      const overridden = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-linked-override",
+        codexInput: [{ type: "text", text: "test" }],
+        runtimePolicy: {
+          runtimeMode: "auto",
+          interactionMode: "default",
+          cwd: "/work/app",
+          additionalDirectories: [{ path: "/work/api", name: "api" }],
+          sandboxPolicy: { type: "workspaceWrite", writableRoots: ["/work/cache"] },
+        },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      });
+      assert.deepEqual(overridden.sandboxPolicy, {
+        type: "workspaceWrite",
+        writableRoots: ["/work/cache", "/work/api"],
+      });
       // Read-only and full access already reach every folder.
       assert.deepEqual((yield* build("approval-required")).sandboxPolicy, { type: "readOnly" });
       assert.deepEqual((yield* build("full-access")).sandboxPolicy, { type: "dangerFullAccess" });
