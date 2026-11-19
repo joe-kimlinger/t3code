@@ -359,11 +359,14 @@ export function planSidebarNestDrop(input: {
   readonly target: SidebarNestTarget;
   /** Sibling order keys under the target parent. */
   readonly orderKeysByKey: ReadonlyMap<string, string | null | undefined>;
+  /** Threads nested anywhere under the dragged one; none of them can become its parent. */
+  readonly descendantKeys: ReadonlySet<string>;
 }): ReadonlyArray<SidebarArrangeWrite> | null {
   const { activeKey, currentParentKey, target } = input;
   if (target.parentKey === null) {
     return currentParentKey === null ? null : [{ key: activeKey, parentKey: null }];
   }
+  if (target.parentKey === activeKey || input.descendantKeys.has(target.parentKey)) return null;
   if (
     currentParentKey === target.parentKey &&
     target.siblingKeys.length === input.currentSiblingKeys.length &&

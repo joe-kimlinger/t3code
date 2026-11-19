@@ -579,6 +579,25 @@ describe("buildThreadListV2Items", () => {
       ["other", 0, "card"],
     ]);
     expect(layout.settledCount).toBe(0);
+    // Under a settled parent, a child that is still active leaves the closed shelf.
+    const settledParent = buildThreadListV2Items({
+      threads: [
+        makeThread({ id: parent, title: "Parent", settledOverride: "settled", settledAt: NOW }),
+        makeThread({
+          id: ThreadId.make("active-child"),
+          title: "Active",
+          arrangedParentThreadId: parent,
+        }),
+      ],
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+      settledShelfExpanded: false,
+    });
+    expect(settledParent.items.map((item) => [item.thread.id, item.depth ?? 0])).toEqual([
+      ["active-child", 0],
+    ]);
+    expect(settledParent.settledCount).toBe(1);
     expect(
       getThreadListV2OrderedSection({ threads, section: "active", now: NOW }).map(
         (thread) => thread.id,

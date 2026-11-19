@@ -39,7 +39,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-inbox";
 import { sortSettledThreads } from "@t3tools/client-runtime/state/thread-sort";
 import {
-  arrangeThreads,
+  arrangeThreadsKeepingUnparked,
   arrangedDescendants,
   flattenArrangedThreads,
 } from "@t3tools/client-runtime/state/thread-arrangement";
@@ -690,8 +690,14 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   } = input;
   const preciseNow = new Date().toISOString();
   const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent);
-  // Nested threads follow their parent's section, so only top-level threads are partitioned.
-  const arrangement = arrangeThreads(visible);
+  // Nested threads follow their parent's section, so only top-level threads are partitioned,
+  // except one a parked parent would hide while it still needs the user.
+  const arrangement = arrangeThreadsKeepingUnparked(
+    visible,
+    (thread) =>
+      serverConfigs.has(thread.environmentId) &&
+      (thread.settledOverride === "settled" || effectiveSnoozed(thread, { now: preciseNow })),
+  );
   const roots = visible.filter(
     (thread) => arrangement.parentKeyOf(threadShellKey(thread)) === null,
   );
@@ -2210,6 +2216,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         orderKeysByKey: new Map(
           siblings.map((thread) => [siblingKey(thread), thread.arrangedOrderKey] as const),
         ),
+        descendantKeys: new Set(arrangedDescendants(activeKey, arrangement).map(siblingKey)),
       }),
     };
   };

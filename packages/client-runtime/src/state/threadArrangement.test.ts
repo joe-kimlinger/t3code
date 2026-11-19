@@ -2,6 +2,7 @@ import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  arrangeThreadsKeepingUnparked,
   arrangeParentCandidates,
   arrangeThreads,
   arrangedDescendants,
@@ -95,5 +96,29 @@ describe("arrangeThreads", () => {
     expect(
       arrangeParentCandidates(moving, threads, arrangeThreads(threads)).map((t) => t.id),
     ).toEqual(["root", "sibling"]);
+  });
+
+  it("keeps a thread that needs the user out of a parked parent's shelf, with its own nested threads", () => {
+    const threads = [
+      thread("settled-root"),
+      thread("settled-child", "settled-root"),
+      thread("working-child", "settled-root"),
+      thread("under-working", "working-child"),
+      thread("active-root"),
+      thread("active-child", "active-root"),
+    ];
+    const parked = new Set(["settled-root", "settled-child", "under-working"]);
+    const arrangement = arrangeThreadsKeepingUnparked(threads, (t) => parked.has(t.id));
+    expect(arrangement.parentKeyOf(key("settled-child"))).toBe(key("settled-root"));
+    expect(arrangement.parentKeyOf(key("working-child"))).toBeNull();
+    expect(arrangement.childrenOf(key("settled-root")).map((t) => t.id)).toEqual(["settled-child"]);
+    // Its own nested threads follow it, parked or not.
+    expect(arrangement.parentKeyOf(key("under-working"))).toBe(key("working-child"));
+    // Under an unparked root, a parked child still follows its parent.
+    expect(
+      arrangeThreadsKeepingUnparked(threads, (t) => t.id === "active-child").parentKeyOf(
+        key("active-child"),
+      ),
+    ).toBe(key("active-root"));
   });
 });
