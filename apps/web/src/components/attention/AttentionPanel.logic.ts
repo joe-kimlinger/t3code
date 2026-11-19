@@ -11,6 +11,7 @@ import {
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
 import {
+  effectiveParentThreadId,
   isListedThreadLineage,
   type AttentionItem,
   type AttentionItemFeatures,
@@ -146,7 +147,13 @@ export function deriveAttention(input: {
       thread.deletedAt === null &&
       isListedThreadLineage(thread.lineage),
   );
-  const arrangement = arrangeThreads(listed);
+  // Rolls up by the shared effective parent, so changes to its rules reach the panel too.
+  const arrangement = arrangeThreads(
+    listed.map((thread) => ({
+      ...thread,
+      arrangedParentThreadId: effectiveParentThreadId(thread),
+    })),
+  );
   const candidates: AttentionEntry[] = [];
   const running: RunningEntry[] = [];
   const later: LaterEntry[] = [];
