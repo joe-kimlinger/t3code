@@ -1054,6 +1054,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     nestingDepth > 0
       ? { paddingInlineStart: `${Math.min(nestingDepth, SIDEBAR_MAX_INDENT_DEPTH) * 0.875}rem` }
       : undefined;
+  // One guide per level, down the middle of each indent, so a parent's nested rows read as a run.
+  const nestingGuides =
+    nestingDepth > 0
+      ? Array.from({ length: Math.min(nestingDepth, SIDEBAR_MAX_INDENT_DEPTH) }, (_, level) => (
+          <span
+            key={level}
+            aria-hidden
+            data-testid="sidebar-nesting-guide"
+            className="pointer-events-none absolute inset-y-0 w-px bg-muted-foreground/30"
+            style={{ insetInlineStart: `${level * 0.875 + 0.375}rem` }}
+          />
+        ))
+      : null;
   const nestedChildCount = props.nestedChildCount ?? 0;
   const { onToggleNestedChildren } = props;
   const nestedToggle =
@@ -1403,9 +1416,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         className={cn(
           "list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(9)]",
           metaLine !== null && multiline && "[contain-intrinsic-size:auto_--spacing(13.5)]",
-          sortable?.isDragging && "relative z-20",
+          sortable?.isDragging ? "relative z-20" : nestingDepth > 0 && "relative",
         )}
       >
+        {nestingGuides}
         <Tooltip disabled={isRenaming || sortable?.isDragging}>
           <TooltipTrigger
             render={
@@ -1444,7 +1458,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       "opacity-40 grayscale group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:grayscale-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
                   )}
                 >
-                  {props.project ? (
+                  {props.project && nestingDepth === 0 ? (
                     <ProjectFavicon project={props.project} className="size-4" />
                   ) : null}
                 </span>
@@ -1610,9 +1624,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       className={cn(
         "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
         metaLineEmpty && "[contain-intrinsic-size:auto_60px]",
-        sortable?.isDragging && "relative z-20",
+        sortable?.isDragging ? "relative z-20" : nestingDepth > 0 && "relative",
       )}
     >
+      {nestingGuides}
       <Tooltip disabled={isRenaming || snoozeMenuOpen || sortable?.isDragging}>
         <TooltipTrigger
           render={
@@ -1643,13 +1658,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {nestedToggle}
               {draftIndicator}
-              {props.project ? (
+              {/* A nested row shares its parent's project, so only top-level rows name it. */}
+              {props.project && nestingDepth === 0 ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />
               ) : null}
               {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
               {pinIndicator}
-              {props.projectDisplayName ? (
+              {props.projectDisplayName && nestingDepth === 0 ? (
                 <span
                   className={cn("min-w-0 flex-1 truncate font-normal text-secondary-label text-xs")}
                 >
