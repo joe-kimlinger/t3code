@@ -13,7 +13,11 @@ import {
   runRanAfter,
   usageLimitBlockedRun,
 } from "@t3tools/shared/orchestrationV2ThreadError";
-import { isListedThreadLineage, threadIssueKeysEqual } from "@t3tools/contracts";
+import {
+  effectiveParentThreadId,
+  isListedThreadLineage,
+  threadIssueKeysEqual,
+} from "@t3tools/contracts";
 import { canonicalizeGitCafePullRequestUrl } from "@t3tools/source-control-definitions/registry";
 import { threadPullRequestsOf } from "../sourceControl/threadPullRequests.ts";
 import {
@@ -1923,13 +1927,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       return `Thread ${parentThreadId} is in another project.`;
     }
     const visited = new Set<ThreadId>([parent.id]);
-    let ancestorId = parent.arrangedParentThreadId ?? null;
+    let ancestorId = effectiveParentThreadId(parent);
     while (ancestorId !== null && !visited.has(ancestorId)) {
       if (ancestorId === thread.id) {
         return `Thread ${parentThreadId} is nested under ${thread.id}; nesting would form a cycle.`;
       }
       visited.add(ancestorId);
-      ancestorId = (yield* findThread(ancestorId))?.arrangedParentThreadId ?? null;
+      const ancestor = yield* findThread(ancestorId);
+      ancestorId = ancestor === null ? null : effectiveParentThreadId(ancestor);
     }
     return null;
   });
@@ -1945,7 +1950,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const current = yield* findThread(currentId);
       if (current === null) return null;
       if (current.deletedAt === null && current.archivedAt === null) return current.id;
-      currentId = current.arrangedParentThreadId ?? null;
+      currentId = effectiveParentThreadId(current);
     }
     return null;
   });
@@ -4885,10 +4890,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
     }
     // The parent may have been archived or deleted meanwhile; its children moved up without this one.
-    const unarchivedArrangedParentThreadId =
-      command.type === "thread.unarchive" && thread.arrangedParentThreadId != null
-        ? yield* liveArrangedAncestor(thread.arrangedParentThreadId)
+    const parentBeforeUnarchive =
+      command.type === "thread.unarchive" && isListedThreadLineage(thread.lineage)
+        ? effectiveParentThreadId(thread)
         : null;
+    const unarchivedArrangedParentThreadId =
+      parentBeforeUnarchive === null ? null : yield* liveArrangedAncestor(parentBeforeUnarchive);
     let restoredUnsettledAt: DateTime.Utc | null | undefined;
     if (command.type === "thread.unsettle" && command.restoreUnsettledAt !== undefined) {
       const parsed =
@@ -5004,14 +5011,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return {
             ...thread,
             archivedAt: null,
-            ...(thread.arrangedParentThreadId == null
+            ...(unarchivedArrangedParentThreadId === parentBeforeUnarchive
               ? {}
               : {
                   arrangedParentThreadId: unarchivedArrangedParentThreadId,
-                  arrangedOrderKey:
-                    unarchivedArrangedParentThreadId === thread.arrangedParentThreadId
-                      ? (thread.arrangedOrderKey ?? null)
-                      : null,
+                  arrangedOrderKey: null,
                 }),
             updatedAt: now,
           };
@@ -5985,7 +5989,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       threadId: command.threadId,
       providerInstanceId: thread.providerInstanceId,
       occurredAt: now,
-      payload: { ...thread, projectId: command.projectId, worktreePath: null, updatedAt: now },
+      payload: {
+        ...thread,
+        projectId: command.projectId,
+        worktreePath: null,
+        // Arrangement is per project, so the thread arrives at the top level.
+        ...(thread.projectId === command.projectId
+          ? {}
+          : { arrangedParentThreadId: null, arrangedOrderKey: null }),
+        updatedAt: now,
+      },
     });
   });
 
@@ -16336,42 +16349,55 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ),
     );
 
-  // Children move up after the parent commits, each under its own lock. A crash in between
-  // leaves a dangling arranged parent, which readers treat as top level.
+  /** Each arrangement holds its project's arrangement lock, then the moved thread's lock. */
+  const dispatchArrangement = (
+    command: Extract<OrchestrationV2ServerCommand, { readonly type: "thread.arrange" }>,
+    projectId: ProjectId,
+  ) =>
+    threadDispatch.withArrangementLock(
+      projectId,
+      threadDispatch.withLock(command.threadId, dispatchWithReceiptEffect(command)),
+    );
+
+  // Children move up after the parent changes, each as its own arrangement. A crash in between
+  // leaves a dangling arranged parent, which readers treat as top level. `parent` is the parent
+  // as it was before the change, so a thread that left its project still finds its children.
   const promoteArrangedChildren = Effect.fn("Orchestrator.promoteArrangedChildren")(
-    function* (commandId: CommandId, threadId: ThreadId) {
-      const parent = yield* findThread(threadId);
-      if (parent === null) return;
+    function* (commandId: CommandId, parent: OrchestrationV2AppThread) {
       const childIds = yield* projectionStore
         .listArrangedChildThreadIds(parent.projectId, parent.id)
-        .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: parent.id, cause }),
+          ),
+        );
       if (childIds.length === 0) return;
-      const newParentThreadId = yield* liveArrangedAncestor(parent.arrangedParentThreadId ?? null);
+      const grandparentThreadId = effectiveParentThreadId(parent);
+      const newParentThreadId =
+        grandparentThreadId === null ? null : yield* liveArrangedAncestor(grandparentThreadId);
       for (const childId of childIds) {
-        yield* threadDispatch
-          .withLock(
-            childId,
-            dispatchWithReceiptEffect({
-              type: "thread.arrange",
-              commandId: CommandId.make(`${commandId}:arranged-child:${childId}`),
+        yield* dispatchArrangement(
+          {
+            type: "thread.arrange",
+            commandId: CommandId.make(`${commandId}:arranged-child:${childId}`),
+            threadId: childId,
+            parentThreadId: newParentThreadId,
+          },
+          parent.projectId,
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Failed to move an arranged child up", {
               threadId: childId,
-              parentThreadId: newParentThreadId,
+              cause,
             }),
-          )
-          .pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Failed to move an arranged child up", {
-                threadId: childId,
-                cause,
-              }),
-            ),
-          );
+          ),
+        );
       }
     },
-    (effect, _commandId, threadId) =>
+    (effect, _commandId, parent) =>
       effect.pipe(
         Effect.catchCause((cause) =>
-          Effect.logWarning("Failed to move arranged children up", { threadId, cause }),
+          Effect.logWarning("Failed to move arranged children up", { threadId: parent.id, cause }),
         ),
       ),
   );
@@ -16416,7 +16442,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ? threadDispatch.withDeletionLock(cascade)
         : cascade;
       if (command.type !== "thread.unarchive") {
-        yield* promoteArrangedChildren(command.commandId, command.threadId);
+        const parent = yield* findThread(command.threadId);
+        if (parent !== null) yield* promoteArrangedChildren(command.commandId, parent);
+      }
+      return result;
+    }
+    if (command.type === "thread.arrange") {
+      const thread = yield* findThread(command.threadId);
+      return yield* thread === null ? dispatch : dispatchArrangement(command, thread.projectId);
+    }
+    if (command.type === "thread.project.adopt-folder") {
+      // Its children stay in the project it leaves, so they move up there.
+      const before = yield* findThread(command.threadId);
+      const result = yield* dispatch;
+      if (before !== null && before.projectId !== command.projectId) {
+        yield* promoteArrangedChildren(command.commandId, before);
       }
       return result;
     }

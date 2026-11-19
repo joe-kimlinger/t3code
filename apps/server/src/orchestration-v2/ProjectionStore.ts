@@ -568,7 +568,10 @@ export interface ProjectionStoreV2Shape {
   readonly getSubagentCount: (threadId: ThreadId) => Effect.Effect<number, ProjectionStoreV2Error>;
   readonly getRunCount: (threadId: ThreadId) => Effect.Effect<number, ProjectionStoreV2Error>;
   /** Child threads of the thread's app-owned tasks, in task order, without decoding the tasks. */
-  /** Live, unarchived threads the user arranged under `parentThreadId`. */
+  /**
+   * Live, unarchived, listed threads whose effective parent is `parentThreadId`: arranged under
+   * it, or never arranged and forked from it.
+   */
   readonly listArrangedChildThreadIds: (
     projectId: ProjectId,
     parentThreadId: ThreadId,
@@ -1933,7 +1936,8 @@ export function threadShellFromProjection(
     ...(projection.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: projection.thread.activeOrderKey }),
-    ...(projection.thread.arrangedParentThreadId == null
+    // null is a deliberate top level; only an absent value falls back to the execution parent.
+    ...(projection.thread.arrangedParentThreadId === undefined
       ? {}
       : { arrangedParentThreadId: projection.thread.arrangedParentThreadId }),
     ...(projection.thread.arrangedOrderKey == null
@@ -2257,7 +2261,8 @@ function shellFromState(input: {
     ...(input.state.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: input.state.thread.activeOrderKey }),
-    ...(input.state.thread.arrangedParentThreadId == null
+    // null is a deliberate top level; only an absent value falls back to the execution parent.
+    ...(input.state.thread.arrangedParentThreadId === undefined
       ? {}
       : { arrangedParentThreadId: input.state.thread.arrangedParentThreadId }),
     ...(input.state.thread.arrangedOrderKey == null
@@ -6716,7 +6721,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       sql<{ readonly thread_id: string }>`SELECT thread_id
         FROM orchestration_v2_projection_threads
         WHERE project_id = ${projectId} AND deleted_at IS NULL AND archived_at IS NULL
-          AND json_extract(payload_json, '$.arrangedParentThreadId') = ${parentThreadId}
+          AND (
+            json_extract(payload_json, '$.arrangedParentThreadId') = ${parentThreadId}
+            OR (
+              json_type(payload_json, '$.arrangedParentThreadId') IS NULL
+              AND json_extract(payload_json, '$.lineage.parentThreadId') = ${parentThreadId}
+            )
+          )
+          AND COALESCE(json_extract(payload_json, '$.lineage.relationshipToParent'), '') != 'subagent'
+          AND COALESCE(json_extract(payload_json, '$.lineage.sideChat'), 0) = 0
         ORDER BY thread_id ASC`.pipe(
         Effect.map((rows) => rows.map((row) => ThreadId.make(row.thread_id))),
         Effect.mapError(controlReadError(parentThreadId)),

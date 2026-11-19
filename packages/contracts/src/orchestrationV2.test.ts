@@ -11,6 +11,7 @@ import {
   TrimmedNonEmptyString,
 } from "./index.ts";
 import {
+  effectiveParentThreadId,
   latestProviderTurnForAttempt,
   OrchestrationV2CheckpointFileSummary,
   OrchestrationV2ProviderCapabilities,
@@ -702,5 +703,33 @@ describe("withMessageSenderNote", () => {
     [{ createdBy: "agent", creationSource: "server" }, "Hi", "Hi"],
   ] as const)("labels %j's message %j for the provider", (message, text, expected) => {
     expect(withMessageSenderNote(message, text)).toBe(expected);
+  });
+});
+
+describe("effectiveParentThreadId", () => {
+  const source = ThreadId.make("source");
+  const arranged = ThreadId.make("arranged");
+  const fork = {
+    parentThreadId: source,
+    relationshipToParent: "fork" as const,
+    rootThreadId: source,
+  };
+  it.each([
+    ["a never-arranged fork keeps its source", fork, undefined, source],
+    ["an arranged fork follows the arrangement", fork, arranged, arranged],
+    ["a fork moved to the top level has no parent", fork, null, null],
+    [
+      "a subagent keeps its caller whatever it carries",
+      { ...fork, relationshipToParent: "subagent" as const },
+      arranged,
+      source,
+    ],
+  ] as const)("%s", (_name, lineage, arrangedParentThreadId, expected) => {
+    expect(
+      effectiveParentThreadId({
+        lineage,
+        ...(arrangedParentThreadId === undefined ? {} : { arrangedParentThreadId }),
+      }),
+    ).toBe(expected);
   });
 });
