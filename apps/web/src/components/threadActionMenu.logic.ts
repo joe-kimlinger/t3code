@@ -1,5 +1,11 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
+import {
+  arrangeParentCandidates,
+  arrangedThreadKey,
+  type ArrangeableThread,
+  type ThreadArrangement,
+} from "@t3tools/client-runtime/state/thread-arrangement";
 import { msg } from "gt-react";
 
 import { m, type MessageResolver } from "../i18n/messages";
@@ -20,6 +26,9 @@ export type ThreadActionMenuId =
   | "snooze"
   | `snooze:${string}`
   | "unsnooze"
+  | "move-under"
+  | `move-under:${string}`
+  | "move-to-top-level"
   | "rename"
   | "regenerate-title"
   | "mark-unread"
@@ -121,6 +130,34 @@ export interface ThreadActionMenuState {
   readonly canShareWithGuest?: boolean;
   /** A No project thread with its own folder, on a server that can promote it. */
   readonly canTurnIntoProject?: boolean;
+  /** Where the thread can move in the thread tree; absent where arranging is unavailable. */
+  readonly arrangement?: {
+    readonly nested: boolean;
+    /** Threads it can move under, by scoped thread key. */
+    readonly parentCandidates: ReadonlyArray<{ readonly key: string; readonly title: string }>;
+  } | null;
+}
+
+/** "Move under…" lists this many threads, most recent first; the sidebar drag reaches the rest. */
+const MOVE_UNDER_CANDIDATE_LIMIT = 15;
+
+/** The menu's view of where `thread` sits in `arrangement` and where it can move. */
+export function threadArrangementMenuState<
+  T extends ArrangeableThread & { readonly title: string; readonly updatedAt: string },
+>(
+  thread: T,
+  threads: readonly T[],
+  arrangement: ThreadArrangement<T>,
+): NonNullable<ThreadActionMenuState["arrangement"]> {
+  const currentParentKey = arrangement.parentKeyOf(arrangedThreadKey(thread));
+  return {
+    nested: currentParentKey !== null,
+    parentCandidates: arrangeParentCandidates(thread, threads, arrangement)
+      .filter((candidate) => arrangedThreadKey(candidate) !== currentParentKey)
+      .toSorted((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+      .slice(0, MOVE_UNDER_CANDIDATE_LIMIT)
+      .map((candidate) => ({ key: arrangedThreadKey(candidate), title: candidate.title })),
+  };
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
@@ -196,6 +233,29 @@ export function buildThreadActionMenuItems(
                   },
                 ],
               },
+        ]
+      : []),
+    ...(state.arrangement
+      ? [
+          {
+            id: "move-under" as const,
+            label: resolve(msg("Move under…", { $context: "nest this thread under another" })),
+            icon: "list-tree",
+            disabled: state.arrangement.parentCandidates.length === 0,
+            children: state.arrangement.parentCandidates.map((candidate) => ({
+              id: `move-under:${candidate.key}` as const,
+              label: candidate.title,
+            })),
+          },
+          ...(state.arrangement.nested
+            ? [
+                {
+                  id: "move-to-top-level" as const,
+                  label: resolve(msg("Move to top level")),
+                  icon: "list-start",
+                },
+              ]
+            : []),
         ]
       : []),
     { id: "rename", label: resolve(msg("Rename thread")), icon: "pencil", separatorBefore: true },

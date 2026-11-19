@@ -227,18 +227,29 @@ export function sortPinnedThreadsByOrderKey<
     readonly environmentId?: string | undefined;
   },
 >(threads: readonly T[]): T[] {
+  return sortKeyedThenNewest(threads, (thread) => thread.pinOrderKey);
+}
+
+/** Keyed threads in key order, then keyless ones newest first; `planPinnedReorder` assumes this. */
+export function sortKeyedThenNewest<
+  T extends {
+    readonly id: string;
+    readonly createdAt: string;
+    readonly environmentId?: string | undefined;
+  },
+>(threads: readonly T[], orderKeyOf: (thread: T) => string | null | undefined): T[] {
   if (threads.length < 2) return [...threads];
   const keyed: T[] = [];
   const keyless: T[] = [];
   for (const thread of threads) {
-    (thread.pinOrderKey != null ? keyed : keyless).push(thread);
+    (orderKeyOf(thread) != null ? keyed : keyless).push(thread);
   }
   const identityTiebreak = (left: T, right: T) =>
     left.id.localeCompare(right.id) ||
     (left.environmentId ?? "").localeCompare(right.environmentId ?? "");
   keyed.sort((left, right) => {
-    const leftKey = left.pinOrderKey!;
-    const rightKey = right.pinOrderKey!;
+    const leftKey = orderKeyOf(left)!;
+    const rightKey = orderKeyOf(right)!;
     return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : identityTiebreak(left, right);
   });
   const timestamps = new Map(

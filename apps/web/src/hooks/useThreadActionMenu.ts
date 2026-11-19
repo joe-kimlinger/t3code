@@ -11,6 +11,7 @@ import {
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import {
   AuthOrchestrationOperateScope,
+  isListedThreadLineage,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -21,8 +22,13 @@ import { pickSnoozePreset, resolveSnoozePresets } from "../components/Sidebar.sn
 import {
   buildThreadActionMenuItems,
   threadActionRequiresOperate,
+  threadArrangementMenuState,
   type ThreadActionMenuId,
 } from "../components/threadActionMenu.logic";
+import {
+  arrangeThreads,
+  arrangedThreadKey,
+} from "@t3tools/client-runtime/state/thread-arrangement";
 import { titleRegenerationToast } from "../components/threadTitleRegenerationToast";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { copyThreadReference } from "../lib/copyThreadReference";
@@ -35,6 +41,7 @@ import {
   readEnvironmentServerConfigLoaded,
   readEnvironmentSupportsAutoSettleOptOut,
   readThreadShell,
+  readThreadShells,
   useProjects,
 } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
@@ -91,6 +98,7 @@ export function useThreadActionMenu(input: {
     deleteThread,
     markThreadUnread,
     turnThreadIntoProject,
+    arrangeThread,
   } = useThreadActions();
   const regenerateThreadTitle = useOrchestrationCommand(threadEnvironment.regenerateTitle, {
     reportFailure: false,
@@ -138,6 +146,15 @@ export function useThreadActionMenu(input: {
       };
       const isRegeneratingTitle = thread.titleRegeneration != null;
       const snoozePresets = resolveSnoozePresets(now, timestampFormat, threadRef.environmentId);
+      const listedThreads = configLoaded
+        ? readThreadShells().filter(
+            (candidate) =>
+              candidate.environmentId === threadRef.environmentId &&
+              candidate.archivedAt === null &&
+              isListedThreadLineage(candidate.lineage),
+          )
+        : [];
+      const arrangement = arrangeThreads(listedThreads);
       const items = buildThreadActionMenuItems({
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         canFind: onFind !== undefined,
@@ -154,6 +171,10 @@ export function useThreadActionMenu(input: {
         snoozePresets,
         canShareWithGuest,
         canTurnIntoProject: canTurnThreadIntoProject(threadRef),
+        arrangement:
+          configLoaded && isListedThreadLineage(thread.lineage)
+            ? threadArrangementMenuState(thread, listedThreads, arrangement)
+            : null,
       });
       const clicked = await settlePromise(() => api.contextMenu.show(items, position));
       if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -166,6 +187,20 @@ export function useThreadActionMenu(input: {
           m(msg("Thread action unavailable")),
           new Error(m(msg("This connection cannot change threads."))),
         );
+        return;
+      }
+      if (action.startsWith("move-under:") || action === "move-to-top-level") {
+        const parentKey =
+          action === "move-to-top-level" ? null : action.slice("move-under:".length);
+        const parent =
+          parentKey === null
+            ? null
+            : listedThreads.find((candidate) => arrangedThreadKey(candidate) === parentKey);
+        if (parent === undefined) return;
+        const result = await arrangeThread(threadRef, parent?.id ?? null);
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          failureToast(m(msg("Failed to move thread")), squashAtomCommandFailure(result));
+        }
         return;
       }
       if (action.startsWith("snooze:")) {

@@ -325,6 +325,7 @@ export function applyOrchestrationV2ProjectionEvent(
     case "thread.visited":
     case "thread.tags-updated":
     case "thread.marked-unread":
+    case "thread.arranged":
       return { ...projection, thread: event.payload };
     case "thread.visit-recorded":
       return {

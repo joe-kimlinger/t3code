@@ -2,6 +2,7 @@ import { closestCenter, type CollisionDetection, type Modifier } from "@dnd-kit/
 import { verticalListSortingStrategy, type SortingStrategy } from "@dnd-kit/sortable";
 import {
   resolveSidebarDropTarget,
+  resolveSidebarNestTarget,
   sidebarListItemId,
   sidebarMarkerId,
   type SidebarListItem,
@@ -101,6 +102,8 @@ export function createSidebarSortingStrategy(input: {
   cardHeight?: number;
   slimHeight?: number;
   boundaryLabelHeight?: number;
+  /** Nesting levels the pointer has moved sideways; a nested landing shifts rows in place. */
+  depthOffset?: number;
 }): SortingStrategy {
   if (input.enabled === false) return () => stationary;
   const { items } = input;
@@ -112,6 +115,13 @@ export function createSidebarSortingStrategy(input: {
     const active = items[activeIndex];
     const over = items[overIndex] ?? active;
     if (active?.kind !== "thread" || !over || !rects[0]) return [];
+    const nest = resolveSidebarNestTarget(
+      items,
+      active.key,
+      sidebarListItemId(over),
+      input.depthOffset ?? 0,
+    );
+    if (nest !== null && nest.depth > 0) return null;
     const target = resolveSidebarDropTarget(items, active.key, sidebarListItemId(over));
     if (!target) return [];
     const groups: Record<SidebarSection, ThreadItem[]> = {
@@ -124,8 +134,12 @@ export function createSidebarSortingStrategy(input: {
     let cardHeight = input.cardHeight;
     let slimHeight = input.slimHeight;
     let headerScale: number | undefined;
+    // Top-level rows sort; nested rows travel with the top-level row above them.
+    const nested = new Map<string, ThreadItem[]>();
+    let currentRoot: ThreadItem[] | null = null;
     for (const [index, item] of items.entries()) {
       if (item.kind === "marker") {
+        currentRoot = null;
         if (isShelfHeader(item)) {
           const height = rects[index]?.height;
           if (height) headerScale ??= height / 32;
@@ -135,8 +149,17 @@ export function createSidebarSortingStrategy(input: {
       if (item.section === "pinned" || item.section === "active" || item.section === "working")
         cardHeight ??= rects[index]?.height;
       else slimHeight ??= rects[index]?.height;
-      if (item.key !== active.key) groups[item.section].push(item);
+      if (item.key === active.key) continue;
+      if (item.depth > 0 && currentRoot !== null) {
+        currentRoot.push(item);
+        continue;
+      }
+      currentRoot = [];
+      nested.set(item.key, currentRoot);
+      groups[item.section].push(item);
     }
+    const withNested = (list: readonly ThreadItem[]) =>
+      list.flatMap((item) => [item, ...(nested.get(item.key) ?? [])]);
     const scale =
       slimHeight !== undefined ? slimHeight / 36 : (headerScale ?? (cardHeight ?? 82) / 82);
     cardHeight ??= 82 * scale;
@@ -154,7 +177,11 @@ export function createSidebarSortingStrategy(input: {
     const index = group.findIndex(
       (item) => (ranks.get(item.key) ?? Number.POSITIVE_INFINITY) > rank,
     );
-    group.splice(index < 0 ? group.length : index, 0, { ...active, section: target.section });
+    group.splice(index < 0 ? group.length : index, 0, {
+      ...active,
+      section: target.section,
+      depth: 0,
+    });
     const settledOrder = (
       input.settledOrder.length > 0 ? input.settledOrder : groups.settled.map((item) => item.key)
     ).filter((key) => key !== active.key || target.section === "settled");
@@ -165,20 +192,20 @@ export function createSidebarSortingStrategy(input: {
     if (routeKey && settledOrder.includes(routeKey) && !visible.includes(routeKey)) {
       visible.push(routeKey);
     }
-    groups.settled = visible.map((key) => ({ kind: "thread", key, section: "settled" }));
+    groups.settled = visible.map((key) => ({ kind: "thread", key, section: "settled", depth: 0 }));
     const projected: SidebarListItem[] = [];
     const marker = (name: SidebarListMarker) => projected.push({ kind: "marker", marker: name });
     const section = (name: "active" | "settled") => {
-      if (groups[name].length > 0) projected.push(...groups[name]);
+      if (groups[name].length > 0) projected.push(...withNested(groups[name]));
       else marker(`${name}-placeholder`);
     };
     marker("pinned-header");
-    projected.push(...groups.pinned);
+    projected.push(...withNested(groups.pinned));
     marker("pinned-divider");
     section("active");
     if (items.some((item) => item.kind === "marker" && item.marker === "working-header")) {
       marker("working-header");
-      projected.push(...groups.working);
+      projected.push(...withNested(groups.working));
     }
     if (
       groups.snoozed.length > 0 ||
@@ -186,7 +213,7 @@ export function createSidebarSortingStrategy(input: {
         items.some((item) => item.kind === "marker" && item.marker === "snoozed-header"))
     ) {
       marker("snoozed-header");
-      projected.push(...groups.snoozed);
+      projected.push(...withNested(groups.snoozed));
     }
     marker("settled-header");
     section("settled");

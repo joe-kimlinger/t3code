@@ -380,6 +380,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                   attachments,
                 },
               }),
+          ...(caller === undefined ? {} : { arrangedParentThreadId: caller.id }),
           createdBy: "agent",
           creationSource: "mcp",
           ...(linkOrigin === undefined ? {} : { linkOrigin }),

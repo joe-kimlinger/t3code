@@ -50,6 +50,7 @@ import {
   pinThread,
   reorderPinnedThread,
   reorderActiveThread,
+  arrangeThread,
   setThreadAutoSettle,
   settleThread,
   snoozeThread,
@@ -249,6 +250,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     reorderActive: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:reorder-active",
       execute: reorderActiveThread,
+      scheduler,
+      concurrency,
+    }),
+    arrange: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:arrange",
+      execute: arrangeThread,
       scheduler,
       concurrency,
     }),
@@ -564,6 +571,11 @@ export function createThreadEnvironmentAtoms<R, E>(
     reorderActive: optimistic.wrap(commands.reorderActive, (thread, input) => ({
       ...thread,
       activeOrderKey: input.orderKey,
+    })),
+    arrange: optimistic.wrap(commands.arrange, (thread, input) => ({
+      ...thread,
+      arrangedParentThreadId: input.parentThreadId,
+      arrangedOrderKey: input.parentThreadId === null ? null : (input.orderKey ?? null),
     })),
     // Shown at once, so a composer that releases its accepted pick keeps showing it.
     setModelSelection: optimistic.wrap(commands.setModelSelection, (thread, input) => ({
