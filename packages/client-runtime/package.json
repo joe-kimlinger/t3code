@@ -387,6 +387,14 @@
       "types": "./src/state/subagentRuntime.ts",
       "default": "./src/state/subagentRuntime.ts"
     },
+    "./state/attention": {
+      "types": "./src/state/attention.ts",
+      "default": "./src/state/attention.ts"
+    },
+    "./state/attention-ranking": {
+      "types": "./src/state/attentionRanking.ts",
+      "default": "./src/state/attentionRanking.ts"
+    },
     "./state/thread-arrangement": {
       "types": "./src/state/threadArrangement.ts",
       "default": "./src/state/threadArrangement.ts"

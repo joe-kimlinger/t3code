@@ -175,6 +175,28 @@ Pinned threads stay above the folders, and Snoozed and Settled stay below them. 
 can drag a thread onto the composer to mention it, but not within the sidebar, and the Working
 section is off. Each device keeps its own choice.
 
+## See what needs you
+
+The **Attention** panel at the bottom of the sidebar lists what needs you across every connected
+environment. **Now** shows the few items that need you most: approvals, questions, plans to
+review, failures, unread finished threads and woken snoozes, plus GitHub pull requests waiting on
+your review, failing CI, change requests and approvals ready to merge. **Running** shows active
+threads with how long they have run, and **Later** holds snoozed items and anything you muted.
+Nested threads roll up under their top thread, as in "2 of 5 subthreads need you".
+
+Act from the row: approve or deny, answer a single question, accept a plan, open, snooze, settle,
+or mute by person, repository, project or kind. On pull requests, **Hand to agent** checks the
+pull request out into a new thread with a task in the composer. Hover the **?** on a row to see
+which signals and rules placed it. In the panel, `j` and `k` move between rows, `Enter` opens,
+`s` snoozes and `d` dismisses. Toggle the panel with its shortcut (`mod+shift+u` by default) or
+from the command palette, and drag its top edge to resize it.
+
+To tune it, open **Settings → Threads → Attention panel**. **Not important** and **More like
+this** write rules into `attention-preferences.md` in the environment's T3 home; you can edit that
+file there or in any editor, and changes apply as soon as you save. The panel also learns from
+what you act on, dismiss or leave alone; **Reset learning** forgets that history. GitHub items
+cover the repositories of the environment's projects and use its GitHub sign-in.
+
 ## Settle finished work
 
 Choose **Settle thread** from its menu to move finished work out of the active list
