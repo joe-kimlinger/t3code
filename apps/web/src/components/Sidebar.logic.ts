@@ -220,7 +220,13 @@ export function sidebarMarkerId(marker: SidebarListMarker): string {
 }
 
 export type SidebarListItem =
-  | { readonly kind: "thread"; readonly key: string; readonly section: SidebarSection }
+  | {
+      readonly kind: "thread";
+      readonly key: string;
+      readonly section: SidebarSection;
+      /** 0 for a top-level row; nested rows follow their parent. */
+      readonly depth: number;
+    }
   | { readonly kind: "marker"; readonly marker: SidebarListMarker };
 
 export function sidebarListItemId(item: SidebarListItem): string {
@@ -270,10 +276,121 @@ export function resolveSidebarDropTarget(
         item.marker === "settled-header"
       )
         break;
+    } else if (item.depth > 0 && item.key !== activeKey) {
+      // Nested rows follow their parent; only top-level rows have a section order.
+      continue;
     } else if (currentSection === "pinned") pinnedOrder.push(item.key);
     else activeOrder.push(item.key);
   }
   return { section, pinnedOrder, activeOrder };
+}
+
+/** Horizontal drag distance that moves a dragged row one nesting level. */
+export const SIDEBAR_NEST_DRAG_STEP_PX = 24;
+/** Nesting deeper than this still nests, but draws at this indent. */
+export const SIDEBAR_MAX_INDENT_DEPTH = 4;
+
+export type SidebarNestTarget = {
+  readonly depth: number;
+  readonly parentKey: string | null;
+  /** Rows at `depth` under `parentKey` once dropped, in order, including the dragged one. */
+  readonly siblingKeys: readonly string[];
+};
+
+/**
+ * Where a dragged row lands in the thread tree, as in an outliner: the slot sets its neighbours
+ * and dragging right or left by `depthOffset` levels indents it under the row above or out again.
+ */
+export function resolveSidebarNestTarget(
+  items: readonly SidebarListItem[],
+  activeKey: string,
+  overId: string,
+  depthOffset: number,
+): SidebarNestTarget | null {
+  const activeIndex = items.findIndex((item) => sidebarListItemId(item) === activeKey);
+  const overIndex = items.findIndex((item) => sidebarListItemId(item) === overId);
+  const active = items[activeIndex];
+  if (activeIndex === -1 || overIndex === -1 || active?.kind !== "thread") return null;
+  const moved = items.filter((_, index) => index !== activeIndex);
+  moved.splice(overIndex, 0, active);
+  const previous = moved[overIndex - 1];
+  const next = moved[overIndex + 1];
+  const maxDepth = previous?.kind === "thread" ? previous.depth + 1 : 0;
+  const minDepth = next?.kind === "thread" ? Math.min(next.depth, maxDepth) : 0;
+  const depth = Math.min(maxDepth, Math.max(minDepth, active.depth + depthOffset));
+  if (depth === 0) return { depth, parentKey: null, siblingKeys: [] };
+  let parentIndex = -1;
+  for (let index = overIndex - 1; index >= 0; index -= 1) {
+    const item = moved[index]!;
+    if (item.kind !== "thread") break;
+    if (item.depth === depth - 1) {
+      parentIndex = index;
+      break;
+    }
+  }
+  const parent = moved[parentIndex];
+  if (parent?.kind !== "thread") return { depth: 0, parentKey: null, siblingKeys: [] };
+  const siblingKeys: string[] = [];
+  for (let index = parentIndex + 1; index < moved.length; index += 1) {
+    const item = moved[index]!;
+    if (item.kind !== "thread") break;
+    const itemDepth = index === overIndex ? depth : item.depth;
+    if (itemDepth < depth) break;
+    if (itemDepth === depth) siblingKeys.push(item.key);
+  }
+  return { depth, parentKey: parent.key, siblingKeys };
+}
+
+export type SidebarArrangeWrite = {
+  readonly key: string;
+  readonly parentKey: string | null;
+  readonly orderKey?: string;
+};
+
+/**
+ * The arrangement writes a drop needs, or null when it changes no nesting. A drop at the top
+ * level only un-nests; the section move that follows is planned by `planSidebarThreadDrop`.
+ */
+export function planSidebarNestDrop(input: {
+  readonly activeKey: string;
+  readonly currentParentKey: string | null;
+  /** The new parent's children before the drop, in order. */
+  readonly currentSiblingKeys: readonly string[];
+  readonly target: SidebarNestTarget;
+  /** Sibling order keys under the target parent. */
+  readonly orderKeysByKey: ReadonlyMap<string, string | null | undefined>;
+}): ReadonlyArray<SidebarArrangeWrite> | null {
+  const { activeKey, currentParentKey, target } = input;
+  if (target.parentKey === null) {
+    return currentParentKey === null ? null : [{ key: activeKey, parentKey: null }];
+  }
+  if (
+    currentParentKey === target.parentKey &&
+    target.siblingKeys.length === input.currentSiblingKeys.length &&
+    target.siblingKeys.every((key, index) => key === input.currentSiblingKeys[index])
+  ) {
+    return null;
+  }
+  const assignments = planPinnedReorder({
+    orderedIds: target.siblingKeys,
+    keysById: input.orderKeysByKey,
+    movedId: activeKey,
+  });
+  const movedOrderKey = assignments.find((assignment) => assignment.id === activeKey)?.orderKey;
+  return [
+    {
+      key: activeKey,
+      parentKey: target.parentKey,
+      ...(movedOrderKey === undefined ? {} : { orderKey: movedOrderKey }),
+    },
+    ...assignments
+      .filter((assignment) => assignment.id !== activeKey)
+      .map((assignment) => ({
+        key: assignment.id,
+        parentKey: target.parentKey,
+        orderKey: assignment.orderKey,
+      })),
+  ];
 }
 
 type SidebarThreadDropPlan =

@@ -15,10 +15,11 @@ import {
   type SidebarSection,
 } from "./Sidebar.logic";
 
-const thread = (key: string, section: SidebarSection): SidebarListItem => ({
+const thread = (key: string, section: SidebarSection, depth = 0): SidebarListItem => ({
   kind: "thread",
   key,
   section,
+  depth,
 });
 const marker = (marker: SidebarListMarker): SidebarListItem => ({ kind: "marker", marker });
 const pinnedHeader = marker("pinned-header");
@@ -295,6 +296,25 @@ describe("sidebar drag projection", () => {
     settledHeader,
     thread("s1", "settled"),
   ];
+
+  it("moves nested rows with their parent, and shifts rows in place for a nested landing", () => {
+    const items = [
+      pinnedHeader,
+      divider,
+      thread("a1", "active"),
+      thread("a1-child", "active", 1),
+      thread("a2", "active"),
+      settledHeader,
+    ];
+    const input = { items, settledOrder: [], settledExpanded: true };
+    const moved = preview(input, "a2", "a1");
+    expect(moved.get("a1")).toEqual({ ...stationary, y: 83 });
+    expect(moved.get("a1-child")).toEqual({ ...stationary, y: 83 });
+    // Dragged right, a2 lands under a1-child as a sibling; nothing above it moves.
+    const nested = preview({ ...input, depthOffset: 1 }, "a2", "a2");
+    expect(nested.get("a1")).toEqual(stationary);
+    expect(nested.get("a1-child")).toEqual(stationary);
+  });
 
   it("keeps the pinned header above the gap when a lower pin moves to the top", () => {
     const result = preview(

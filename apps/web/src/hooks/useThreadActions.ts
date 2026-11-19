@@ -331,6 +331,9 @@ export function useThreadActions() {
   const reorderActiveThreadMutation = useOrchestrationCommand(threadEnvironment.reorderActive, {
     reportFailure: false,
   });
+  const arrangeThreadMutation = useOrchestrationCommand(threadEnvironment.arrange, {
+    reportFailure: false,
+  });
   const snoozeThreadMutation = useOrchestrationCommand(threadEnvironment.snooze, {
     reportFailure: false,
   });
@@ -933,6 +936,21 @@ export function useThreadActions() {
     });
   };
 
+  /** Nests `target` under `parentThreadId` in thread lists, or moves it to the top level with null. */
+  const arrangeThread = (
+    target: ScopedThreadRef,
+    parentThreadId: ThreadId | null,
+    orderKey?: string,
+  ) =>
+    arrangeThreadMutation({
+      environmentId: target.environmentId,
+      input: {
+        threadId: target.threadId,
+        parentThreadId,
+        ...(orderKey === undefined ? {} : { orderKey }),
+      },
+    });
+
   const unsnoozeThread = async (target: ScopedThreadRef) => {
     if (!readEnvironmentServerConfigLoaded(target.environmentId)) {
       return AsyncResult.failure(
@@ -1059,6 +1077,7 @@ export function useThreadActions() {
     confirmAndUnpinThread,
     reorderPinnedThread,
     reorderActiveThread,
+    arrangeThread,
     markThreadUnread,
     setThreadAutoSettle,
     turnThreadIntoProject: (target: ScopedThreadRef) =>
