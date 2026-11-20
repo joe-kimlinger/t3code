@@ -223,7 +223,7 @@ describe("ssh tunnel scripts", () => {
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
-  it.live("passes over an nvm default older than the engine range", () =>
+  it.live("loads nvm under set -u and passes over an nvm default older than the engine range", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ssh-nvm-" });
@@ -240,7 +240,9 @@ describe("ssh tunnel scripts", () => {
           mode: 0o755,
         });
       }
-      const script = `${SshTunnel.buildRemoteNodeEnvScript({ nodeScriptPath: "/unused", nodeEngineRange: ">=999.0.0" })}\nensure_remote_node_path && node`;
+      // Like the real nvm.sh, this reads an unset variable, which set -u rejects.
+      yield* fs.writeFileString(NodePath.join(home, ".nvm/nvm.sh"), ': "$T3_TEST_UNSET"\n');
+      const script = `set -eu\n${SshTunnel.buildRemoteNodeEnvScript({ nodeScriptPath: "/unused", nodeEngineRange: ">=999.0.0" })}\nensure_remote_node_path && node`;
       const result = NodeChildProcess.spawnSync("sh", ["-c", script], {
         env: { HOME: home, PATH: "/usr/bin:/bin" },
         encoding: "utf8",

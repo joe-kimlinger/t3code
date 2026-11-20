@@ -446,11 +446,16 @@ ensure_remote_node_path() {
   export NVM_DIR
 
   if [ -s "$NVM_DIR/nvm.sh" ]; then
+    # nvm reads unset variables, so it fails under the launch script's set -u.
+    T3_SHELL_FLAGS="$-"
+    set +eu
     # shellcheck disable=SC1090
     . "$NVM_DIR/nvm.sh"
     if ! command -v node >/dev/null 2>&1 && command -v nvm >/dev/null 2>&1; then
       nvm use --silent default >/dev/null 2>&1 || nvm use --silent node >/dev/null 2>&1 || nvm use --silent --lts >/dev/null 2>&1 || true
     fi
+    case "$T3_SHELL_FLAGS" in *e*) set -e ;; esac
+    case "$T3_SHELL_FLAGS" in *u*) set -u ;; esac
   fi
 
   # An nvm default older than the engine range falls through to another installed version.
