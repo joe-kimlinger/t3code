@@ -223,6 +223,32 @@ describe("ssh tunnel scripts", () => {
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
+  it.live("passes over an nvm default older than the engine range", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ssh-nvm-" });
+      // Each fake node passes the engine check only if it is new enough, then names itself.
+      const fakeNode = (name: string, satisfies: boolean) =>
+        `#!/bin/sh\nif [ "$1" = - ]; then cat >/dev/null; exit ${satisfies ? 0 : 1}; fi\necho ${name}\n`;
+      for (const [dir, name, satisfies] of [
+        ["bin", "default", false],
+        [".nvm/versions/node/v26.7.0/bin", "v26", true],
+        [".nvm/versions/node/v9.0.0/bin", "v9", false],
+      ] as const) {
+        yield* fs.makeDirectory(NodePath.join(home, dir), { recursive: true });
+        yield* fs.writeFileString(NodePath.join(home, dir, "node"), fakeNode(name, satisfies), {
+          mode: 0o755,
+        });
+      }
+      const script = `${SshTunnel.buildRemoteNodeEnvScript({ nodeScriptPath: "/unused", nodeEngineRange: ">=999.0.0" })}\nensure_remote_node_path && node`;
+      const result = NodeChildProcess.spawnSync("sh", ["-c", script], {
+        env: { HOME: home, PATH: "/usr/bin:/bin" },
+        encoding: "utf8",
+      });
+      assert.equal(result.stdout.trim(), "v26");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.live("reports only the failed launch's own output, not an earlier launch's log", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

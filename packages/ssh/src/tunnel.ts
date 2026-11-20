@@ -453,13 +453,20 @@ ensure_remote_node_path() {
     fi
   fi
 
-  if ! command -v node >/dev/null 2>&1 && [ -d "$NVM_DIR/versions/node" ]; then
+  # An nvm default older than the engine range falls through to another installed version.
+  if ! { command -v node >/dev/null 2>&1 && remote_node_satisfies_engine >/dev/null 2>&1; } && [ -d "$NVM_DIR/versions/node" ]; then
+    T3_PATH_WITHOUT_NVM_NODE="$PATH"
+    T3_NVM_NODE_BIN=""
     for T3_NODE_BIN in "$NVM_DIR"/versions/node/*/bin; do
       if [ -x "$T3_NODE_BIN/node" ]; then
-        PATH="$T3_NODE_BIN:$PATH"
-        export PATH
+        PATH="$T3_NODE_BIN:$T3_PATH_WITHOUT_NVM_NODE"
+        if [ -z "$T3_NVM_NODE_BIN" ] || remote_node_satisfies_engine >/dev/null 2>&1; then
+          T3_NVM_NODE_BIN="$T3_NODE_BIN"
+        fi
       fi
     done
+    PATH="\${T3_NVM_NODE_BIN:+$T3_NVM_NODE_BIN:}$T3_PATH_WITHOUT_NVM_NODE"
+    export PATH
   fi
 
   command -v node >/dev/null 2>&1 && remote_node_satisfies_engine
