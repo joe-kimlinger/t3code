@@ -296,6 +296,24 @@ export const hasPendingMigrations = Effect.fn("hasPendingMigrations")(function* 
   return (row?.latestId ?? 0) < latestMigrationId || (row?.previewRows ?? 0) > 0;
 });
 
+// This fork once recorded its own migrations at 101 and 102, ids upstream later took. Forgetting
+// those rows lets upstream's run there; the fork's moved migrations are idempotent and rerun above.
+const FORK_RENUMBERED_MIGRATIONS = [
+  [101, "ProjectionProjectsAdditionalRoots"],
+  [102, "Attention"],
+] as const;
+
+const forgetRenumberedForkMigrations = Effect.fn("forgetRenumberedForkMigrations")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+  `;
+  if (tables.length === 0) return;
+  for (const [id, name] of FORK_RENUMBERED_MIGRATIONS) {
+    yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = ${id} AND name = ${name}`;
+  }
+});
+
 const run = Migrator.make({});
 
 export interface RunMigrationsOptions {
@@ -313,6 +331,7 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   // The reconcile takes the write lock; CLI startup must not contend with the server for a no-op.
   const previewMigrations = includesV2 && hasPending ? yield* reconcileV2PreviewMigration() : [];
   if (includesV2) {
+    if (hasPending) yield* forgetRenumberedForkMigrations();
     yield* assertV2MigrationsCanRun(toMigrationInclusive);
   }
   const sql = yield* SqlClient.SqlClient;

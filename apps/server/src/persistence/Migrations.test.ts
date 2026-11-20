@@ -8,6 +8,8 @@ import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
+import ForkAttention from "./Migrations/103_Attention.ts";
+import ForkAdditionalRoots from "./Migrations/104_ProjectionProjectsAdditionalRoots.ts";
 
 const v2Migrations = migrationManifest.filter(([id]) => id >= 55);
 const newerMigrationId = Math.max(...migrationManifest.map(([id]) => id)) + 1;
@@ -182,6 +184,25 @@ describe("runMigrations", () => {
       assert.deepStrictEqual(
         yield* runMigrations(),
         migrationManifest.filter(([id]) => id >= 70),
+      );
+      assert.deepStrictEqual(yield* history, migrationManifest);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("moves the fork's migrations recorded at 101 and 102 past upstream's", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 100 });
+      yield* ForkAdditionalRoots;
+      yield* ForkAttention;
+      yield* sql`
+        INSERT INTO effect_sql_migrations (migration_id, name)
+        VALUES (101, 'ProjectionProjectsAdditionalRoots'), (102, 'Attention')
+      `;
+
+      assert.deepStrictEqual(
+        yield* runMigrations(),
+        migrationManifest.filter(([id]) => id > 100),
       );
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
