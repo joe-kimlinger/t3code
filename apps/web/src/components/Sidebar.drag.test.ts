@@ -314,6 +314,11 @@ describe("sidebar drag projection", () => {
     const nested = preview({ ...input, depthOffset: 1 }, "a2", "a2");
     expect(nested.get("a1")).toEqual(stationary);
     expect(nested.get("a1-child")).toEqual(stationary);
+    // The boundary labels keep their room, so they never draw over rows.
+    const labelled = preview({ ...input, depthOffset: 1, boundaryLabelHeight: 16 }, "a2", "a2");
+    expect(labelled.get(sidebarMarkerId("pinned-divider"))?.y).toBe(16);
+    expect(labelled.get("a1")?.y).toBe(32);
+    expect(labelled.get("a1-child")?.y).toBe(32);
   });
 
   it("keeps the pinned header above the gap when a lower pin moves to the top", () => {

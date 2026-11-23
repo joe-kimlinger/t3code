@@ -246,7 +246,7 @@ function sectionAtSidebarSlot(items: readonly SidebarListItem[], index: number):
   return section;
 }
 
-type SidebarDropTarget = {
+export type SidebarDropTarget = {
   readonly section: "pinned" | "active" | "settled";
   readonly pinnedOrder: readonly string[];
   readonly activeOrder: readonly string[];

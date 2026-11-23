@@ -1,10 +1,11 @@
 import { closestCenter, type CollisionDetection, type Modifier } from "@dnd-kit/core";
-import { verticalListSortingStrategy, type SortingStrategy } from "@dnd-kit/sortable";
+import type { SortingStrategy } from "@dnd-kit/sortable";
 import {
   resolveSidebarDropTarget,
   resolveSidebarNestTarget,
   sidebarListItemId,
   sidebarMarkerId,
+  type SidebarDropTarget,
   type SidebarListItem,
   type SidebarListMarker,
   type SidebarSection,
@@ -109,7 +110,7 @@ export function createSidebarSortingStrategy(input: {
   const { items } = input;
   const indices = new Map(items.map((item, index) => [sidebarListItemId(item), index]));
   let previous: Pick<Layout, "rects" | "activeIndex" | "overIndex"> | undefined;
-  let transforms: ReturnType<SortingStrategy>[] | null = [];
+  let transforms: ReturnType<SortingStrategy>[] = [];
 
   function project({ rects, activeIndex, overIndex }: Layout) {
     const active = items[activeIndex];
@@ -121,9 +122,11 @@ export function createSidebarSortingStrategy(input: {
       sidebarListItemId(over),
       input.depthOffset ?? 0,
     );
-    if (nest !== null && nest.depth > 0) return null;
-    const target = resolveSidebarDropTarget(items, active.key, sidebarListItemId(over));
-    if (!target) return [];
+    const nestedLandingTarget = nest !== null && nest.depth > 0;
+    const target = nestedLandingTarget
+      ? null
+      : resolveSidebarDropTarget(items, active.key, sidebarListItemId(over));
+    if (!nestedLandingTarget && !target) return [];
     const groups: Record<SidebarSection, ThreadItem[]> = {
       pinned: [],
       active: [],
@@ -165,58 +168,84 @@ export function createSidebarSortingStrategy(input: {
     cardHeight ??= 82 * scale;
     slimHeight ??= 36 * scale;
     const labelHeight = (input.boundaryLabelHeight ?? 0) * scale;
-    const group = groups[target.section];
-    const order =
-      target.section === "pinned"
-        ? target.pinnedOrder
-        : target.section === "settled"
-          ? input.settledOrder
-          : (input.activeOrder ?? target.activeOrder);
-    const ranks = new Map(order.map((key, index) => [key, index]));
-    const rank = ranks.get(active.key) ?? Number.POSITIVE_INFINITY;
-    const index = group.findIndex(
-      (item) => (ranks.get(item.key) ?? Number.POSITIVE_INFINITY) > rank,
-    );
-    group.splice(index < 0 ? group.length : index, 0, {
-      ...active,
-      section: target.section,
-      depth: 0,
-    });
-    const settledOrder = (
-      input.settledOrder.length > 0 ? input.settledOrder : groups.settled.map((item) => item.key)
-    ).filter((key) => key !== active.key || target.section === "settled");
-    const visible = input.settledExpanded
-      ? settledOrder.slice(0, input.settledVisibleCount ?? settledOrder.length)
-      : [];
-    const routeKey = input.routeThreadKey;
-    if (routeKey && settledOrder.includes(routeKey) && !visible.includes(routeKey)) {
-      visible.push(routeKey);
+    const moving: ThreadItem = active;
+    function nestedLanding() {
+      const moved = items.filter((_, index) => index !== activeIndex);
+      moved.splice(overIndex, 0, moving);
+      const filled = new Set(
+        moved.flatMap((item) => (item.kind === "thread" ? [item.section] : [])),
+      );
+      return moved.filter(
+        (item) =>
+          !(
+            item.kind === "marker" &&
+            ((item.marker === "active-placeholder" && filled.has("active")) ||
+              (item.marker === "settled-placeholder" && filled.has("settled")))
+          ),
+      );
     }
-    groups.settled = visible.map((key) => ({ kind: "thread", key, section: "settled", depth: 0 }));
-    const projected: SidebarListItem[] = [];
-    const marker = (name: SidebarListMarker) => projected.push({ kind: "marker", marker: name });
-    const section = (name: "active" | "settled") => {
-      if (groups[name].length > 0) projected.push(...withNested(groups[name]));
-      else marker(`${name}-placeholder`);
-    };
-    marker("pinned-header");
-    projected.push(...withNested(groups.pinned));
-    marker("pinned-divider");
-    section("active");
-    if (items.some((item) => item.kind === "marker" && item.marker === "working-header")) {
-      marker("working-header");
-      projected.push(...withNested(groups.working));
+    function sectionLanding(target: SidebarDropTarget) {
+      const group = groups[target.section];
+      const order =
+        target.section === "pinned"
+          ? target.pinnedOrder
+          : target.section === "settled"
+            ? input.settledOrder
+            : (input.activeOrder ?? target.activeOrder);
+      const ranks = new Map(order.map((key, index) => [key, index]));
+      const rank = ranks.get(moving.key) ?? Number.POSITIVE_INFINITY;
+      const index = group.findIndex(
+        (item) => (ranks.get(item.key) ?? Number.POSITIVE_INFINITY) > rank,
+      );
+      group.splice(index < 0 ? group.length : index, 0, {
+        ...moving,
+        section: target.section,
+        depth: 0,
+      });
+      const settledOrder = (
+        input.settledOrder.length > 0 ? input.settledOrder : groups.settled.map((item) => item.key)
+      ).filter((key) => key !== moving.key || target.section === "settled");
+      const visible = input.settledExpanded
+        ? settledOrder.slice(0, input.settledVisibleCount ?? settledOrder.length)
+        : [];
+      const routeKey = input.routeThreadKey;
+      if (routeKey && settledOrder.includes(routeKey) && !visible.includes(routeKey)) {
+        visible.push(routeKey);
+      }
+      groups.settled = visible.map((key) => ({
+        kind: "thread",
+        key,
+        section: "settled",
+        depth: 0,
+      }));
+      const projected: SidebarListItem[] = [];
+      const marker = (name: SidebarListMarker) => projected.push({ kind: "marker", marker: name });
+      const section = (name: "active" | "settled") => {
+        if (groups[name].length > 0) projected.push(...withNested(groups[name]));
+        else marker(`${name}-placeholder`);
+      };
+      marker("pinned-header");
+      projected.push(...withNested(groups.pinned));
+      marker("pinned-divider");
+      section("active");
+      if (items.some((item) => item.kind === "marker" && item.marker === "working-header")) {
+        marker("working-header");
+        projected.push(...withNested(groups.working));
+      }
+      if (
+        groups.snoozed.length > 0 ||
+        ((moving.section !== "snoozed" || (input.snoozedThreadCount ?? 0) > 1) &&
+          items.some((item) => item.kind === "marker" && item.marker === "snoozed-header"))
+      ) {
+        marker("snoozed-header");
+        projected.push(...withNested(groups.snoozed));
+      }
+      marker("settled-header");
+      section("settled");
+      return projected;
     }
-    if (
-      groups.snoozed.length > 0 ||
-      ((active.section !== "snoozed" || (input.snoozedThreadCount ?? 0) > 1) &&
-        items.some((item) => item.kind === "marker" && item.marker === "snoozed-header"))
-    ) {
-      marker("snoozed-header");
-      projected.push(...withNested(groups.snoozed));
-    }
-    marker("settled-header");
-    section("settled");
+    // A nested landing keeps every row in place but still needs the boundary labels' room.
+    const projected = target === null ? nestedLanding() : sectionLanding(target);
     const heights = projected.map((item) => {
       const index = indices.get(sidebarListItemId(item));
       const rect = index === undefined ? undefined : rects[index];
@@ -271,8 +300,6 @@ export function createSidebarSortingStrategy(input: {
       previous = args;
       transforms = project(args);
     }
-    return transforms === null
-      ? verticalListSortingStrategy(args)
-      : (transforms[args.index] ?? stationary);
+    return transforms[args.index] ?? stationary;
   };
 }
