@@ -572,4 +572,25 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
       assert.equal(error._tag, "MigrateDevDbSharedHomeError");
     }),
   );
+
+  it.effect("refuses a base dir marked protected", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const sourceDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-src-" });
+      const destDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-protected-" });
+      const source = yield* createFixtureSource(sourceDir);
+      const kept = path.join(destDir, "userdata", "statev2.sqlite");
+      yield* fs.makeDirectory(path.dirname(kept), { recursive: true });
+      yield* fs.writeFileString(kept, "daily driver");
+      yield* fs.writeFileString(path.join(destDir, "PROTECTED"), "");
+
+      const error = yield* runMigrateDevDb(
+        { baseDir: destDir, source, projects: 5, threadsPerProject: 10 },
+        { sharedHome: sourceDir },
+      ).pipe(Effect.flip);
+      assert.equal(error._tag, "MigrateDevDbProtectedError");
+      assert.equal(yield* fs.readFileString(kept), "daily driver");
+    }),
+  );
 });

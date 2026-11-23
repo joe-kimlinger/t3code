@@ -38,6 +38,17 @@ export class MigrateDevDbSharedHomeError extends Schema.TaggedError<MigrateDevDb
   }
 }
 
+export class MigrateDevDbProtectedError extends Schema.TaggedError<MigrateDevDbProtectedError>()(
+  "MigrateDevDbProtectedError",
+  {
+    markerPath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Refusing to rebuild a protected dev database. Remove '${this.markerPath}' to allow it.`;
+  }
+}
+
 export class MigrateDevDbSourceMissingError extends Schema.TaggedError<MigrateDevDbSourceMissingError>()(
   "MigrateDevDbSourceMissingError",
   {
@@ -481,6 +492,9 @@ const forgetPeerLinksPreviewHistory = Effect.fn("forgetPeerLinksPreviewHistory")
   );
 });
 
+// A daily-driver dev home opts out of rebuilds by holding this file.
+const PROTECTED_MARKER = "PROTECTED";
+
 export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
   input: RunMigrateDevDbInput,
   options: RunMigrateDevDbOptions = {},
@@ -517,6 +531,10 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
   ]);
   if (canonicalBaseDir === canonicalSharedHome) {
     return yield* new MigrateDevDbSharedHomeError();
+  }
+  const markerPath = path.join(baseDir, PROTECTED_MARKER);
+  if (yield* fs.exists(markerPath)) {
+    return yield* new MigrateDevDbProtectedError({ markerPath });
   }
   // Both destination and snapshot are deleted below; reject sources resolving to either.
   const canonicalSourcePath = yield* fs
