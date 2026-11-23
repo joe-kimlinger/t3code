@@ -415,7 +415,7 @@ const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
   "thread.editQueuedMessage": msg("Queue: Edit Last Queued Message"),
   "thread.copyReference": msg("Pull Request: Copy Link or Thread"),
   "sidebar.toggle": msg("Sidebar: Toggle"),
-  "attention.toggle": msg("Attention: Toggle Panel"),
+  "attention.toggle": msg("Working board: Open"),
   "navigation.back": msg("Navigation: Back"),
   "navigation.forward": msg("Navigation: Forward"),
   "terminal.toggle": msg("Terminal: Toggle"),

@@ -133,7 +133,7 @@ open.
 
 ### Nest threads
 
-Put a thread under another to group related work. On web and desktop, drag a thread to just below
+Put a thread under another to group related work, even when the two are in different projects. On web and desktop, drag a thread to just below
 the thread you want as its parent and move the pointer right until it indents; move it left to
 take it back out. You can also pick **Move under…** or **Move to top level** from a thread's menu.
 On mobile, choose **Move under…** from the thread's menu; the picker also offers **Move to top
@@ -179,23 +179,30 @@ section is off. Each device keeps its own choice.
 
 ## See what needs you
 
-The **Attention** panel at the bottom of the sidebar lists what needs you across every connected
-environment. **Now** shows the few items that need you most: approvals, questions, plans to
+The **Working board** lists what needs you across every connected environment. Open it from
+**Working board** at the top of the sidebar, which shows how many items need you. **Now** shows the few items that need you most: approvals, questions, plans to
 review, failures, unread finished threads and woken snoozes, plus GitHub pull requests waiting on
 your review, failing CI, change requests and approvals ready to merge. **Running** shows active
 threads with how long they have run, and **Later** holds snoozed items and anything you muted.
 Nested threads roll up under their top thread, as in "2 of 5 subthreads need you".
 
-Act from the row: approve or deny, answer a single question, accept a plan, open, snooze, settle,
-or mute by person, repository, project or kind. On pull requests, **Hand to agent** checks the
-pull request out into a new thread with a task in the composer. Hover the **?** on a row to see
-which signals and rules placed it. In the panel, `j` and `k` move between rows, `Enter` opens,
-`s` snoozes and `d` dismisses. Toggle the panel with its shortcut (`mod+shift+u` by default) or
-from the command palette, and drag its top edge to resize it.
+Each card is one task: usually a thread, with any pull request alerts for that thread's pull
+requests folded in. A card shows a short AI summary of where the task stands, refreshed whenever
+the thread or its pull requests change, and a reply box that sends a follow-up to the thread
+without leaving the page. Approve or deny, answer a single question, or accept a plan right on
+the card; **Open thread** goes to the full conversation. Links to pull requests and issues sit as
+chips at the bottom of the card. A pull request belongs to the thread that links it or whose branch it is on, in any connected
+environment, so work an agent runs on another machine counts once you connect to it there. While
+that thread is running, the pull request shows under **Running** instead of asking for you. Pull
+requests no thread works on stand as their own cards, where
+**Hand to agent** checks the pull request out into a new thread with a task in the composer.
+Hover the **?** on a card to see which signals and rules placed it. On the page, `j` and `k`
+move between cards, `Enter` opens, `s` snoozes and `d` dismisses. Its shortcut (`mod+shift+u` by default) opens it and returns to
+where you were; the command palette opens it too.
 
-To tune it, open **Settings → Threads → Attention panel**. **Not important** and **More like
+To tune it, open **Settings → Threads → Working board**. **Not important** and **More like
 this** write rules into `attention-preferences.md` in the environment's T3 home; you can edit that
-file there or in any editor, and changes apply as soon as you save. The panel also learns from
+file there or in any editor, and changes apply as soon as you save. The board also learns from
 what you act on, dismiss or leave alone; **Reset learning** forgets that history. GitHub items
 cover the repositories of the environment's projects and use its GitHub sign-in.
 

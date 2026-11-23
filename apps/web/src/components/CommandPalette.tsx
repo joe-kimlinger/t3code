@@ -59,7 +59,6 @@ import {
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { useUiStateStore } from "../uiStateStore";
 import {
   ArrowLeftIcon,
   BellIcon,
@@ -1754,13 +1753,12 @@ function OpenCommandPaletteDialog(props: {
   actionItems.push({
     kind: "action",
     value: "action:attention",
-    searchTerms: ["attention", "inbox", "needs me", "notifications", "triage", "panel"],
-    title: gt("Toggle attention panel"),
+    searchTerms: ["attention", "inbox", "needs me", "notifications", "triage"],
+    title: gt("Open working board"),
     icon: <BellIcon className={ITEM_ICON_CLASS} />,
     shortcutCommand: "attention.toggle",
     run: async () => {
-      const { attentionPanelCollapsed, setAttentionPanelCollapsed } = useUiStateStore.getState();
-      setAttentionPanelCollapsed(!attentionPanelCollapsed);
+      await navigate({ to: "/attention" });
     },
   });
 

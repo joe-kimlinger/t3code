@@ -200,4 +200,83 @@ describe("deriveAttention", () => {
       [itemAttentionId(environmentId, "other"), "2026-11-20T09:00:00.000Z"],
     ]);
   });
+
+  it("folds pull request items into the thread that links them, even a settled one", () => {
+    const link = {
+      host: "github.com",
+      repository: "Acme/Web",
+      number: 7,
+      url: "https://github.com/acme/web/pull/7",
+      source: "created" as const,
+      linkedAt: "2026-11-19T08:00:00.000Z",
+      snapshot: null,
+      stack: null,
+    };
+    const ci = item({ id: "ci", kind: "ci_failing" });
+    const loose = item({ id: "loose", number: 8 });
+    const derived = derive(
+      [
+        shell("owner", {
+          ...finished,
+          pullRequests: [link],
+          updatedAt: at("2026-11-19T10:00:00.000Z"),
+        }),
+        shell("quiet", { pullRequests: [link], settledOverride: "settled" }),
+      ],
+      {
+        ...EMPTY_ATTENTION_SERVER_STATE,
+        items: new Map([
+          [ci.id, ci],
+          [loose.id, loose],
+        ]),
+      },
+    );
+    expect(
+      derived.candidates.map((entry) => [
+        entry.id,
+        entry.kind,
+        entry.payload.type === "thread" ? entry.payload.items.map((folded) => folded.id) : null,
+      ]),
+    ).toEqual([
+      [itemAttentionId(environmentId, "loose"), "review_requested", null],
+      // The most recently active thread linking the pull request owns it.
+      ["thread:env:owner", "completed", ["ci"]],
+    ]);
+
+    const settledOnly = derive(
+      [shell("quiet", { pullRequests: [link], settledOverride: "settled" })],
+      {
+        ...EMPTY_ATTENTION_SERVER_STATE,
+        items: new Map([[ci.id, ci]]),
+      },
+    );
+    expect(settledOnly.candidates.map((entry) => [entry.id, entry.source, entry.kind])).toEqual([
+      ["thread:env:quiet", "github", "ci_failing"],
+    ]);
+
+    // The alert comes from this machine while the agent runs on the devbox, which links the
+    // pull request only through its branch; both machines watch the repository.
+    const devbox = EnvironmentId.make("devbox");
+    const remote = presentThreadShell(devbox, {
+      ...shell("remote").source,
+      branchPullRequest: { projectId, repository: "acme/web", number: 7, url: link.url },
+      latestRunId: RunId.make("run"),
+      activeRunId: RunId.make("run"),
+      status: "running",
+    });
+    const state = { ...EMPTY_ATTENTION_SERVER_STATE, items: new Map([[ci.id, ci]]) };
+    const handled = deriveAttention({
+      threads: [remote],
+      projectTitle: () => "Web",
+      servers: [
+        { environmentId, state },
+        { environmentId: devbox, state },
+      ],
+      nowMs: NOW,
+    });
+    expect(handled.candidates).toEqual([]);
+    expect(handled.running.map((entry) => [entry.id, entry.items.map((i) => i.id)])).toEqual([
+      ["thread:devbox:remote", ["ci"]],
+    ]);
+  });
 });

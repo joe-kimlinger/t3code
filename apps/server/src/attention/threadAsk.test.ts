@@ -13,7 +13,13 @@ import {
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { deterministicThreadAsk, oneLine, planTitle, type ThreadAskShell } from "./threadAsk.ts";
+import {
+  buildStatusSummaryPrompt,
+  deterministicThreadAsk,
+  oneLine,
+  planTitle,
+  type ThreadAskShell,
+} from "./threadAsk.ts";
 
 const now = DateTime.makeUnsafe("2026-11-19T12:00:00.000Z");
 const threadId = ThreadId.make("thread");
@@ -62,6 +68,7 @@ const shell = (overrides: Partial<ThreadAskShell> = {}): ThreadAskShell => ({
   status: "completed",
   lastError: null,
   latestVisibleMessage: null,
+  title: "Fix login",
   ...overrides,
 });
 
@@ -84,10 +91,7 @@ describe("deterministicThreadAsk", () => {
         runtimeRequests: [request("command")],
         turnItems: items,
       }),
-    ).toEqual({
-      summarize: false,
-      ask: { text: "vp run test", generated: false, approval: { requestId, live: true } },
-    });
+    ).toEqual({ text: "vp run test", generated: false, approval: { requestId, live: true } });
   });
 
   it("carries the questions so the panel can answer, and marks lost sessions", () => {
@@ -116,7 +120,7 @@ describe("deterministicThreadAsk", () => {
       runtimeRequests: [request("user_input", { type: "not_resumable", reason: "restarted" })],
       turnItems: items,
     });
-    expect(result.ask).toEqual({
+    expect(result).toEqual({
       text: "Which package should I change?",
       generated: false,
       input: {
@@ -150,7 +154,7 @@ describe("deterministicThreadAsk", () => {
         shell: shell({ hasActionableProposedPlan: true, status: "failed", lastError: "boom" }),
         runtimeRequests: [],
         turnItems: [plan],
-      }).ask,
+      }),
     ).toEqual({
       text: "Move auth to the server",
       generated: false,
@@ -162,7 +166,7 @@ describe("deterministicThreadAsk", () => {
         runtimeRequests: [],
         turnItems: [],
       }),
-    ).toEqual({ summarize: false, ask: { text: "Rate limited", generated: false } });
+    ).toEqual({ text: "Rate limited", generated: false });
     expect(
       deterministicThreadAsk({
         shell: shell({
@@ -176,7 +180,7 @@ describe("deterministicThreadAsk", () => {
         runtimeRequests: [],
         turnItems: [],
       }),
-    ).toEqual({ summarize: true, ask: { text: "Done. Tests pass.", generated: false } });
+    ).toEqual({ text: "Done. Tests pass.", generated: false });
     // The latest run's last reply wins over the shell, which servers often leave empty.
     expect(
       deterministicThreadAsk({
@@ -191,8 +195,73 @@ describe("deterministicThreadAsk", () => {
             streaming: false,
           },
         ],
-      }).ask.text,
+      }).text,
     ).toBe("Merged the fix.");
+  });
+});
+
+describe("buildStatusSummaryPrompt", () => {
+  it("gives the model the request, the reply, what blocks and the pull requests", () => {
+    const inputs = {
+      shell: shell({
+        pendingRuntimeRequest: { id: requestId, kind: "command" as const, createdAt: now },
+        pullRequests: [
+          {
+            host: "github.com",
+            repository: "acme/app",
+            number: 12,
+            url: "https://github.com/acme/app/pull/12",
+            source: "created" as const,
+            linkedAt: "2026-11-19T12:00:00.000Z",
+            snapshot: {
+              state: "open" as const,
+              title: "Fix login redirect",
+              headBranch: "fix/login",
+              baseBranch: "main",
+              isDraft: false,
+              updatedAt: null,
+              syncedAt: "2026-11-19T12:00:00.000Z",
+              checksState: "failing" as const,
+            },
+            stack: null,
+          },
+        ],
+      }),
+      runtimeRequests: [request("command")],
+      turnItems: [
+        {
+          ...itemBase("ask"),
+          createdAt: now,
+          createdBy: null,
+          type: "user_message",
+          messageId: MessageId.make("ask"),
+          inputIntent: "message",
+          text: "Make the redirect keep the next param",
+          textOmitted: false,
+          attachments: [],
+        },
+        {
+          ...itemBase("reply"),
+          type: "assistant_message",
+          messageId: MessageId.make("reply"),
+          text: "Pushed the fix; CI is red on e2e.",
+          streaming: false,
+        },
+        {
+          ...itemBase("approval"),
+          type: "approval_request",
+          requestId,
+          requestKind: "command",
+          prompt: "git push --force",
+        },
+      ] as ReadonlyArray<OrchestrationV2TurnItem>,
+    };
+    const prompt = buildStatusSummaryPrompt(inputs, deterministicThreadAsk(inputs));
+    expect(prompt).toContain("Task: Fix login");
+    expect(prompt).toContain("Make the redirect keep the next param");
+    expect(prompt).toContain("Pushed the fix; CI is red on e2e.");
+    expect(prompt).toContain("waiting for approval: git push --force");
+    expect(prompt).toContain("- acme/app#12 Fix login redirect (open, checks failing)");
   });
 });
 

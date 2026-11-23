@@ -6,6 +6,7 @@ import {
   isCommandPaletteMounted,
   useCommandPaletteStore,
 } from "../commandPaletteStore";
+import { getMainAppHref } from "../components/sidebar/mainAppLocation";
 import { overlayModeForCommand } from "../components/CommandPalette.logic";
 import { APPEARANCE_OPTIONS, notifyThemeSaveFailure } from "../components/CommandPaletteThemeItems";
 import { toggleThemeEditorForTheme } from "../components/settings/themeEditorStore";
@@ -16,7 +17,6 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { type CommandHandler, type CommandScopeOptions, registerCommands } from "./dispatcher";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
-import { useUiStateStore } from "../uiStateStore";
 
 function consume(event: KeyboardEvent): void {
   event.preventDefault();
@@ -98,8 +98,12 @@ export function installCommandPaletteCommands(
       "attention.toggle": (event) => {
         consume(event);
         if (event.repeat) return;
-        const { attentionPanelCollapsed, setAttentionPanelCollapsed } = useUiStateStore.getState();
-        setAttentionPanelCollapsed(!attentionPanelCollapsed);
+        dispatchCommandPalette({ _tag: "SetOpen", open: false });
+        if (router.state.location.pathname === "/attention") {
+          void router.navigate({ href: getMainAppHref() });
+        } else {
+          void router.navigate({ to: "/attention" });
+        }
       },
       "usage.open": (event) => {
         consume(event);

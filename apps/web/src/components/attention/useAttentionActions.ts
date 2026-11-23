@@ -72,6 +72,12 @@ export function useAttentionActions(onAct: (entry: AttentionEntry) => void) {
       ? scopeThreadRef(entry.payload.environmentId, entry.payload.shell.id)
       : null;
 
+  const openUrl = async (url: string) => {
+    const api = readLocalApi();
+    if (api) await api.shell.openExternal(url).catch(() => undefined);
+    else window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   const open = async (entry: AttentionEntry) => {
     void record(entry, "opened");
     const ref = threadRefOf(entry);
@@ -83,11 +89,30 @@ export function useAttentionActions(onAct: (entry: AttentionEntry) => void) {
       return;
     }
     if (entry.payload.type === "item" && entry.payload.item.url !== null) {
-      const url = entry.payload.item.url;
-      const api = readLocalApi();
-      if (api) await api.shell.openExternal(url).catch(() => undefined);
-      else window.open(url, "_blank", "noopener,noreferrer");
+      await openUrl(entry.payload.item.url);
     }
+  };
+
+  /** Sends a follow-up to the task's thread without leaving the page. */
+  const reply = async (entry: AttentionEntry, text: string) => {
+    if (entry.payload.type !== "thread") return false;
+    const { shell } = entry.payload;
+    const result = await startTurn({
+      environmentId: entry.payload.environmentId,
+      input: {
+        threadId: shell.id,
+        message: { messageId: newMessageId(), role: "user", text, attachments: [] },
+        runtimeMode: shell.runtimeMode,
+        interactionMode: shell.interactionMode,
+        createdAt: new Date().toISOString(),
+      },
+    });
+    if (result._tag === "Failure") {
+      reportFailure(m(msg("Could not send the reply")), result);
+      return false;
+    }
+    void record(entry, "answered");
+    return true;
   };
 
   const respondApproval = async (
@@ -188,6 +213,23 @@ export function useAttentionActions(onAct: (entry: AttentionEntry) => void) {
       // Settling shows its own undo.
       void settleThread(ref);
       void record(entry, "dismissed");
+      // Folded pull request items would bring the task back, so they go with it.
+      if (entry.payload.type === "thread") {
+        for (const item of entry.payload.items) {
+          void act({
+            environmentId: entry.payload.environmentId,
+            input: {
+              features: attentionFeaturesOf(entry),
+              action: "dismissed",
+              itemState: {
+                itemId: item.id,
+                snoozedUntil: null,
+                dismissedVersion: itemVersion(item),
+              },
+            },
+          });
+        }
+      }
       return;
     }
     if (entry.payload.type !== "item") return;
@@ -260,6 +302,8 @@ export function useAttentionActions(onAct: (entry: AttentionEntry) => void) {
 
   return {
     open,
+    openUrl,
+    reply,
     respondApproval,
     answer,
     acceptPlan,

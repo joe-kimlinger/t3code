@@ -25,8 +25,6 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadChildrenCollapsedByKey: {},
     defaultAdvertisedEndpointKey: null,
     pullRequestMergeMethod: "merge",
-    attentionPanelHeight: 300,
-    attentionPanelCollapsed: false,
     ...overrides,
   };
 }
@@ -121,9 +119,6 @@ describe("parsePersistedState", () => {
         "environment:thread-1": true,
         invalid: "yes" as unknown as boolean,
       },
-      // A height below the minimum would hide the panel's rows.
-      attentionPanelHeight: 40,
-      attentionPanelCollapsed: true,
     });
 
     expect(parsed).toEqual({
@@ -144,8 +139,6 @@ describe("parsePersistedState", () => {
         },
       },
       threadChildrenCollapsedByKey: { "environment:thread-1": true },
-      attentionPanelHeight: 120,
-      attentionPanelCollapsed: true,
     });
   });
 
@@ -234,8 +227,6 @@ describe("uiStateStore persistence", () => {
       },
       threadChildrenCollapsedByKey: { "environment:thread-1": true },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
-      attentionPanelHeight: 420,
-      attentionPanelCollapsed: true,
     });
 
     persistState(state);
@@ -263,8 +254,6 @@ describe("uiStateStore persistence", () => {
       },
       threadChildrenCollapsedByKey: { "environment:thread-1": true },
       pullRequestMergeMethod: "merge",
-      attentionPanelHeight: 420,
-      attentionPanelCollapsed: true,
     });
     expect(parsePersistedState(persisted)).toEqual({
       ...state,

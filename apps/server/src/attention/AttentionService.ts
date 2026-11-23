@@ -53,12 +53,7 @@ import { buildRerankPrompt, parseRerankReply } from "./attentionRerank.ts";
 import type { AttentionSource } from "./AttentionSource.ts";
 import * as AttentionStore from "./AttentionStore.ts";
 import * as GitHubAttentionSource from "./GitHubAttentionSource.ts";
-import {
-  buildCompletionSummaryPrompt,
-  deterministicThreadAsk,
-  lastReply,
-  oneLine,
-} from "./threadAsk.ts";
+import { buildStatusSummaryPrompt, deterministicThreadAsk, oneLine } from "./threadAsk.ts";
 
 const SUMMARY_TIMEOUT = Duration.seconds(30);
 const RERANK_TIMEOUT = Duration.seconds(45);
@@ -404,8 +399,7 @@ const make = Effect.gen(function* () {
         const cached = yield* store.getThreadAsk({ threadId, key });
         if (cached !== null) return cached;
         const inputs = yield* readAskInputs(threadId);
-        const reply = inputs === null ? null : lastReply(inputs);
-        if (inputs === null || reply === null) return null;
+        if (inputs === null) return null;
         const settings = yield* serverSettings.getSettings;
         const generated = yield* Effect.scoped(
           Effect.gen(function* () {
@@ -414,15 +408,12 @@ const make = Effect.gen(function* () {
             // The only free-form text operation; its output field is named for transcripts.
             return yield* textGeneration.generateTranscriptionPostProcessing({
               cwd,
-              prompt: buildCompletionSummaryPrompt({
-                threadTitle: inputs.shell.title,
-                lastMessage: reply,
-              }),
+              prompt: buildStatusSummaryPrompt(inputs, deterministicThreadAsk(inputs)),
               modelSelection: settings.textGenerationModelSelection,
             });
           }),
         ).pipe(Effect.timeout(SUMMARY_TIMEOUT));
-        const text = oneLine(generated.transcription.replace(/^["']|["']$/g, ""), 120);
+        const text = oneLine(generated.transcription.replace(/^["']|["']$/g, ""), 280);
         if (text === null) return null;
         yield* store.putThreadAsk({ threadId, key, text, at: yield* nowIso });
         return text;
@@ -445,12 +436,11 @@ const make = Effect.gen(function* () {
       Effect.mapError(failure("Could not read the thread.")),
     );
     if (inputs === null) return { text: null, generated: false } satisfies AttentionThreadAsk;
-    const { ask, summarize } = deterministicThreadAsk(inputs);
-    if (!summarize) return ask;
+    const ask = deterministicThreadAsk(inputs);
     const settings = yield* attentionSettings;
     if (!settings.completionSummaries) return ask;
     const summary = yield* Cache.get(summaryCache, `${input.threadId}\n${input.key}`);
-    return summary === null ? ask : { ...ask, text: summary, generated: true };
+    return summary === null ? ask : { ...ask, summary, generated: true };
   });
 
   const rerank = Effect.fn("AttentionService.rerank")(function* (input: AttentionRerankInput) {

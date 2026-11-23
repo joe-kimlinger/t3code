@@ -29,6 +29,8 @@ export type AttentionPayload =
       readonly shell: SidebarThreadSummary;
       /** Changes whenever what the thread needs changes; keys the ask query. */
       readonly askKey: string;
+      /** Server items about this thread's pull requests, folded into its task. */
+      readonly items: ReadonlyArray<AttentionItem>;
     }
   | {
       readonly type: "item";
@@ -44,6 +46,8 @@ export interface RunningEntry {
   readonly shell: SidebarThreadSummary;
   readonly since: string;
   readonly blockedOnWait: boolean;
+  /** Pull request items this thread's agent is already working on. */
+  readonly items: ReadonlyArray<AttentionItem>;
 }
 
 export interface LaterEntry {
@@ -119,6 +123,45 @@ function threadNeed(thread: SidebarThreadSummary, nowIso: string): ThreadNeed {
 
 const BLOCKING_KINDS = new Set(["approval", "input", "request"]);
 
+const pullRequestKey = (repository: string, number: number) =>
+  `${repository.toLowerCase()}#${number}`;
+
+/**
+ * Every pull request a thread works on: ones it links, the one it was opened from, and the one
+ * its branch has. Agents often open a pull request without linking it, so the branch counts.
+ */
+export function threadPullRequestRefs(
+  thread: SidebarThreadSummary,
+): ReadonlyArray<{ readonly repository: string; readonly number: number; readonly url: string }> {
+  const refs = new Map<string, { repository: string; number: number; url: string }>();
+  for (const ref of [
+    ...thread.pullRequests.filter((link) => link.source !== "stack-dismissed"),
+    thread.linkedPullRequest,
+    thread.branchPullRequest,
+  ]) {
+    if (ref == null) continue;
+    const key = pullRequestKey(ref.repository, ref.number);
+    if (!refs.has(key))
+      refs.set(key, { repository: ref.repository, number: ref.number, url: ref.url });
+  }
+  return [...refs.values()];
+}
+
+/** Changes when a linked pull request's state does, so the task's summary refreshes. */
+function pullRequestFingerprint(thread: SidebarThreadSummary): string {
+  return thread.pullRequests
+    .map(({ number, snapshot }) =>
+      [
+        number,
+        snapshot?.state,
+        snapshot?.checksState,
+        snapshot?.reviewDecision,
+        snapshot?.mergeability,
+      ].join("/"),
+    )
+    .join(",");
+}
+
 export interface AttentionDerivation {
   readonly candidates: ReadonlyArray<AttentionEntry>;
   readonly running: ReadonlyArray<RunningEntry>;
@@ -130,7 +173,10 @@ export interface AttentionDerivation {
   } | null;
 }
 
-/** Thread entries from shells already in memory, plus every environment's server items. */
+/**
+ * One task per thread from shells already in memory, with server items about its pull requests
+ * folded in. Items no listed thread links stand as their own tasks.
+ */
 export function deriveAttention(input: {
   readonly threads: ReadonlyArray<SidebarThreadSummary>;
   readonly projectTitle: (environmentId: EnvironmentId, projectId: string) => string | null;
@@ -158,52 +204,33 @@ export function deriveAttention(input: {
   const running: RunningEntry[] = [];
   const later: LaterEntry[] = [];
 
-  for (const thread of listed) {
-    const need = threadNeed(thread, nowIso);
-    if (need === null) continue;
-    if (need.type === "running") {
-      running.push({
-        id: threadAttentionId(thread),
-        environmentId: thread.environmentId,
-        shell: thread,
-        since: need.since,
-        blockedOnWait: need.blockedOnWait,
-      });
-      continue;
-    }
-    // A settled thread only comes back when its agent is blocked on the user.
-    if (thread.settledOverride === "settled" && !BLOCKING_KINDS.has(need.kind)) continue;
-    const entry: AttentionEntry = {
-      id: threadAttentionId(thread),
-      source: "thread",
-      kind: need.kind,
-      since: need.since,
-      repo: null,
-      author: null,
-      project: input.projectTitle(thread.environmentId, thread.projectId),
-      payload: {
-        type: "thread",
-        environmentId: thread.environmentId,
-        shell: thread,
-        askKey: [
-          need.kind,
-          thread.source.pendingRuntimeRequest?.id ?? "",
-          thread.source.latestRunId ?? "",
-          thread.latestRun?.completedAt ?? "",
-        ].join(":"),
-      },
-    };
-    if (effectiveSnoozed(thread, { now: nowIso }) && thread.snoozedUntil !== null) {
-      later.push({ entry, wakeAt: thread.snoozedUntil });
-    } else {
-      candidates.push(entry);
+  // A pull request belongs to the most recently active thread working on it, in any connected
+  // environment: the alert may come from this machine while the agent runs on another.
+  const threadByPullRequest = new Map<string, SidebarThreadSummary>();
+  for (const thread of listed.toSorted((a, b) => a.updatedAt.localeCompare(b.updatedAt))) {
+    for (const ref of threadPullRequestRefs(thread)) {
+      threadByPullRequest.set(pullRequestKey(ref.repository, ref.number), thread);
     }
   }
-
+  const itemsByThread = new Map<SidebarThreadSummary, AttentionItem[]>();
+  // Every environment watching the same repositories reports the same pull requests.
+  const seenItems = new Set<string>();
   for (const { environmentId, state } of input.servers) {
     for (const item of state.items.values()) {
+      if (seenItems.has(item.id)) continue;
+      seenItems.add(item.id);
       const itemState = state.itemStates.get(item.id);
       if (itemState?.dismissedVersion === itemVersion(item)) continue;
+      const snoozedUntil = itemState?.snoozedUntil ?? null;
+      const snoozed = snoozedUntil !== null && Date.parse(snoozedUntil) > input.nowMs;
+      const owner =
+        item.repo === null || item.number === null
+          ? undefined
+          : threadByPullRequest.get(pullRequestKey(item.repo, item.number));
+      if (owner !== undefined && !snoozed) {
+        itemsByThread.set(owner, [...(itemsByThread.get(owner) ?? []), item]);
+        continue;
+      }
       const entry: AttentionEntry = {
         id: itemAttentionId(environmentId, item.id),
         source: item.source,
@@ -214,12 +241,58 @@ export function deriveAttention(input: {
         project: item.projectId === null ? null : input.projectTitle(environmentId, item.projectId),
         payload: { type: "item", environmentId, item },
       };
-      const snoozedUntil = itemState?.snoozedUntil ?? null;
-      if (snoozedUntil !== null && Date.parse(snoozedUntil) > input.nowMs) {
-        later.push({ entry, wakeAt: snoozedUntil });
-      } else {
-        candidates.push(entry);
-      }
+      if (snoozed) later.push({ entry, wakeAt: snoozedUntil });
+      else candidates.push(entry);
+    }
+  }
+
+  for (const thread of listed) {
+    const need = threadNeed(thread, nowIso);
+    const items = itemsByThread.get(thread) ?? [];
+    if (need?.type === "running") {
+      running.push({
+        id: threadAttentionId(thread),
+        environmentId: thread.environmentId,
+        shell: thread,
+        since: need.since,
+        blockedOnWait: need.blockedOnWait,
+        items,
+      });
+      continue;
+    }
+    // A settled thread only comes back when its agent is blocked on the user or its pull
+    // requests need something.
+    const threadNeeds =
+      need !== null && (thread.settledOverride !== "settled" || BLOCKING_KINDS.has(need.kind));
+    const [lead] = items;
+    if (!threadNeeds && lead === undefined) continue;
+    const entry: AttentionEntry = {
+      id: threadAttentionId(thread),
+      source: threadNeeds ? "thread" : lead!.source,
+      kind: threadNeeds ? need.kind : lead!.kind,
+      since: threadNeeds ? need.since : lead!.updatedAt,
+      repo: lead?.repo ?? null,
+      author: threadNeeds ? null : (lead?.author ?? null),
+      project: input.projectTitle(thread.environmentId, thread.projectId),
+      payload: {
+        type: "thread",
+        environmentId: thread.environmentId,
+        shell: thread,
+        items,
+        askKey: [
+          threadNeeds ? need.kind : "items",
+          thread.source.pendingRuntimeRequest?.id ?? "",
+          thread.source.latestRunId ?? "",
+          thread.latestRun?.completedAt ?? "",
+          pullRequestFingerprint(thread),
+          items.map(itemVersion).join(","),
+        ].join(":"),
+      },
+    };
+    if (effectiveSnoozed(thread, { now: nowIso }) && thread.snoozedUntil !== null) {
+      later.push({ entry, wakeAt: thread.snoozedUntil });
+    } else {
+      candidates.push(entry);
     }
   }
 

@@ -11,7 +11,10 @@ export function isAppModalPage(pathname: string) {
 
 export function isSidebarUtilityPage(pathname: string) {
   return (
-    pathname.startsWith("/projects/") || pathname === "/pull-requests" || pathname === "/issues"
+    pathname.startsWith("/projects/") ||
+    pathname === "/pull-requests" ||
+    pathname === "/issues" ||
+    pathname === "/attention"
   );
 }
 
@@ -51,9 +54,13 @@ export function getAppModalReturnThreadTarget() {
   return appModalReturnThreadTarget;
 }
 
+export function getMainAppHref() {
+  return mainAppHref ?? "/";
+}
+
 export function useNavigateToMainApp() {
   const navigate = useNavigate();
-  return () => navigate({ href: mainAppHref ?? "/" });
+  return () => navigate({ href: getMainAppHref() });
 }
 
 /** Leaves Settings or Usage for the page that opened it. */

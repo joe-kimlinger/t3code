@@ -30,7 +30,7 @@ const GITHUB_KINDS = [
   "githubReadyToMerge",
 ] as const satisfies ReadonlyArray<keyof AttentionSettings>;
 
-/** Settings for the attention panel docked at the bottom of the sidebar. */
+/** Settings for the Attention screen. */
 export function AttentionSettingsSection() {
   const gt = useGT();
   const setting = useSearchableSetting();
@@ -48,13 +48,13 @@ export function AttentionSettingsSection() {
   };
 
   return (
-    <SettingsSection id="attention" title={gt("Attention panel")}>
+    <SettingsSection id="attention" title={gt("Working board")}>
       <SettingsRow
         {...setting("attention-now-limit")}
         description={
           <T>
-            How many items Now shows before the rest fold under "more". Toggle the panel with its
-            shortcut or the command palette.
+            How many items Now shows before the rest fold under "more". Open the Working board from
+            the top of the sidebar, its shortcut or the command palette.
           </T>
         }
         control={
@@ -90,7 +90,7 @@ export function AttentionSettingsSection() {
         description={
           <T>
             Watch open pull requests on this environment's project repositories, using its GitHub
-            sign-in. Checked every few minutes while the panel is open.
+            sign-in. Checked every few minutes while T3 Code is open.
           </T>
         }
         control={
