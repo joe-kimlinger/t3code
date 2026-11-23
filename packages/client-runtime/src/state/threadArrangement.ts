@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 
 import { scopedThreadKey } from "../environment/scoped.ts";
 import { sortKeyedThenNewest } from "./threadSort.ts";
@@ -6,7 +6,6 @@ import { sortKeyedThenNewest } from "./threadSort.ts";
 export interface ArrangeableThread {
   readonly environmentId: EnvironmentId;
   readonly id: ThreadId;
-  readonly projectId: ProjectId;
   readonly createdAt: string;
   readonly arrangedParentThreadId?: ThreadId | null | undefined;
   readonly arrangedOrderKey?: string | null | undefined;
@@ -32,8 +31,8 @@ export const arrangedThreadKey = (thread: Pick<ArrangeableThread, "environmentId
   scopedThreadKey({ environmentId: thread.environmentId, threadId: thread.id });
 
 /**
- * Nests `threads` by their arranged parent. A parent missing from `threads` (archived, filtered
- * out, in another project) leaves the child top level, and a cycle from racing moves is cut.
+ * Nests `threads` by their arranged parent, across projects. A parent missing from `threads`
+ * (archived, filtered out) leaves the child top level, and a cycle from racing moves is cut.
  */
 export function arrangeThreads<T extends ArrangeableThread>(
   threads: readonly T[],
@@ -50,7 +49,7 @@ export function arrangeThreads<T extends ArrangeableThread>(
       threadId: thread.arrangedParentThreadId,
     });
     const parent = byKey.get(parentKey);
-    if (parent !== undefined && parentKey !== key && parent.projectId === thread.projectId) {
+    if (parent !== undefined && parentKey !== key) {
       parentKeys.set(key, parentKey);
     }
   }
@@ -153,7 +152,7 @@ export function arrangedDescendants<T extends ArrangeableThread>(
   return descendants;
 }
 
-/** Threads `thread` may be moved under: same project, and not itself or one of its descendants. */
+/** Threads `thread` may be moved under: same environment, not itself or one of its descendants. */
 export function arrangeParentCandidates<T extends ArrangeableThread>(
   thread: T,
   threads: readonly T[],
@@ -164,7 +163,6 @@ export function arrangeParentCandidates<T extends ArrangeableThread>(
   return threads.filter(
     (candidate) =>
       candidate.environmentId === thread.environmentId &&
-      candidate.projectId === thread.projectId &&
       !excluded.has(arrangedThreadKey(candidate)),
   );
 }

@@ -1904,7 +1904,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
   /**
    * Why `thread` cannot be arranged under `parentThreadId`, or null. Arrangement is list
-   * organization only: same project, listed threads, no cycles.
+   * organization only, across projects: listed threads, no cycles.
    */
   const arrangementRefusal = Effect.fn("Orchestrator.arrangementRefusal")(function* (
     thread: OrchestrationV2AppThread,
@@ -1922,9 +1922,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (parent.archivedAt !== null) return `Thread ${parentThreadId} is archived.`;
     if (!isListedThreadLineage(parent.lineage)) {
       return `Thread ${parentThreadId} is a subagent or side chat and cannot hold threads.`;
-    }
-    if (parent.projectId !== thread.projectId) {
-      return `Thread ${parentThreadId} is in another project.`;
     }
     const visited = new Set<ThreadId>([parent.id]);
     let ancestorId = effectiveParentThreadId(parent);
@@ -4104,7 +4101,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       lastVisitedAt: null,
       deletedAt: null,
     };
-    // A launcher that cannot hold the thread (another project, archived, a subagent) leaves it top level.
+    // A launcher that cannot hold the thread (archived, a subagent) leaves it top level.
     const arrangedParentThreadId =
       command.arrangedParentThreadId !== undefined &&
       (yield* arrangementRefusal(thread, command.arrangedParentThreadId)) === null
@@ -5993,10 +5990,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...thread,
         projectId: command.projectId,
         worktreePath: null,
-        // Arrangement is per project, so the thread arrives at the top level.
-        ...(thread.projectId === command.projectId
-          ? {}
-          : { arrangedParentThreadId: null, arrangedOrderKey: null }),
         updatedAt: now,
       },
     });
@@ -16349,23 +16342,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ),
     );
 
-  /** Each arrangement holds its project's arrangement lock, then the moved thread's lock. */
+  /** Each arrangement holds the arrangement lock, then the moved thread's lock. */
   const dispatchArrangement = (
     command: Extract<OrchestrationV2ServerCommand, { readonly type: "thread.arrange" }>,
-    projectId: ProjectId,
   ) =>
     threadDispatch.withArrangementLock(
-      projectId,
       threadDispatch.withLock(command.threadId, dispatchWithReceiptEffect(command)),
     );
 
   // Children move up after the parent changes, each as its own arrangement. A crash in between
-  // leaves a dangling arranged parent, which readers treat as top level. `parent` is the parent
-  // as it was before the change, so a thread that left its project still finds its children.
+  // leaves a dangling arranged parent, which readers treat as top level.
   const promoteArrangedChildren = Effect.fn("Orchestrator.promoteArrangedChildren")(
     function* (commandId: CommandId, parent: OrchestrationV2AppThread) {
       const childIds = yield* projectionStore
-        .listArrangedChildThreadIds(parent.projectId, parent.id)
+        .listArrangedChildThreadIds(parent.id)
         .pipe(
           Effect.mapError(
             (cause) => new OrchestratorProjectionError({ threadId: parent.id, cause }),
@@ -16376,15 +16366,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const newParentThreadId =
         grandparentThreadId === null ? null : yield* liveArrangedAncestor(grandparentThreadId);
       for (const childId of childIds) {
-        yield* dispatchArrangement(
-          {
-            type: "thread.arrange",
-            commandId: CommandId.make(`${commandId}:arranged-child:${childId}`),
-            threadId: childId,
-            parentThreadId: newParentThreadId,
-          },
-          parent.projectId,
-        ).pipe(
+        yield* dispatchArrangement({
+          type: "thread.arrange",
+          commandId: CommandId.make(`${commandId}:arranged-child:${childId}`),
+          threadId: childId,
+          parentThreadId: newParentThreadId,
+        }).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("Failed to move an arranged child up", {
               threadId: childId,
@@ -16449,16 +16436,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
     if (command.type === "thread.arrange") {
       const thread = yield* findThread(command.threadId);
-      return yield* thread === null ? dispatch : dispatchArrangement(command, thread.projectId);
-    }
-    if (command.type === "thread.project.adopt-folder") {
-      // Its children stay in the project it leaves, so they move up there.
-      const before = yield* findThread(command.threadId);
-      const result = yield* dispatch;
-      if (before !== null && before.projectId !== command.projectId) {
-        yield* promoteArrangedChildren(command.commandId, before);
-      }
-      return result;
+      return yield* thread === null ? dispatch : dispatchArrangement(command);
     }
     // Taken before the lineage read, so a message whose read yields keeps its
     // place ahead of later messages to the same thread.

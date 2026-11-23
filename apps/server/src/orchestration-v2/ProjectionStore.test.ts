@@ -3307,7 +3307,7 @@ it.effect("lists a parent's nested threads, not its side chats or subagents", ()
     yield* create("subagent", { parentThreadId: parent, relationshipToParent: "subagent" });
 
     assert.sameMembers(
-      [...(yield* store.listArrangedChildThreadIds(projectId, parent))],
+      [...(yield* store.listArrangedChildThreadIds(parent))],
       [id("nested"), id("fork")],
     );
     // Moving a thread to the top level must survive into shells, or it falls back to its fork source.

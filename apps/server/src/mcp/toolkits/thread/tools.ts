@@ -32,7 +32,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
   description:
-    "Pin, snooze, settle, archive, nest, or mark a thread unread. Omit `threadId` for this thread. `snooze` needs `snoozedUntil`; `nest` needs `parentThreadId`, a thread in the same project; `unnest` moves it to the top level. Settling this thread applies at turn end. A failed turn or queued message leaves it active.",
+    "Pin, snooze, settle, archive, nest, or mark a thread unread. Omit `threadId` for this thread. `snooze` needs `snoozedUntil`; `nest` needs `parentThreadId`, any listed thread, even in another project; `unnest` moves it to the top level. Settling this thread applies at turn end. A failed turn or queued message leaves it active.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),

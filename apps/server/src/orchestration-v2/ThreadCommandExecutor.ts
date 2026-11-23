@@ -1,4 +1,4 @@
-import type { ProjectId, ThreadId } from "@t3tools/contracts";
+import type { ThreadId } from "@t3tools/contracts";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -14,11 +14,10 @@ export class ThreadCommandExecutor extends Context.Service<
      */
     readonly withDeletionLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
     /**
-     * One thread arrangement per project at a time, so two moves cannot each pass the cycle
-     * check against the other's old state. Take it before the moved thread's lock.
+     * One thread arrangement at a time, so two moves cannot each pass the cycle check against
+     * the other's old state. Take it before the moved thread's lock.
      */
     readonly withArrangementLock: <A, E, R>(
-      projectId: ProjectId,
       effect: Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E, R>;
   }
@@ -26,7 +25,7 @@ export class ThreadCommandExecutor extends Context.Service<
 
 export const make = Effect.gen(function* () {
   const deletion = yield* Semaphore.make(1);
-  const arrangement = yield* KeyedLock.make<ProjectId>();
+  const arrangement = yield* Semaphore.make(1);
   return ThreadCommandExecutor.of({
     ...(yield* KeyedLock.make<ThreadId>()),
     withDeletionLock: Effect.fn("ThreadCommandExecutor.withDeletionLock")(function* <A, E, R>(
@@ -34,7 +33,11 @@ export const make = Effect.gen(function* () {
     ) {
       return yield* deletion.withPermit(effect);
     }),
-    withArrangementLock: arrangement.withLock,
+    withArrangementLock: Effect.fn("ThreadCommandExecutor.withArrangementLock")(function* <A, E, R>(
+      effect: Effect.Effect<A, E, R>,
+    ) {
+      return yield* arrangement.withPermit(effect);
+    }),
   });
 });
 

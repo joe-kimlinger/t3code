@@ -4666,13 +4666,16 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       yield* create("b");
       yield* create("c");
       yield* create("other", { project: ProjectId.make("arrange-other-project") });
-      // A launcher's child nests under it; one it cannot hold stays top level.
+      // A launcher's child nests under it, even from another project.
       yield* create("launched", { parent: a });
       yield* create("launched-elsewhere", { parent: other });
       const launched = ThreadId.make("arrange-launched");
       assert.equal(yield* arrangedParent(launched), a);
-      assert.isNull(yield* arrangedParent(ThreadId.make("arrange-launched-elsewhere")));
+      assert.equal(yield* arrangedParent(ThreadId.make("arrange-launched-elsewhere")), other);
 
+      yield* arrange("other-under-a", other, a);
+      assert.equal(yield* arrangedParent(other), a);
+      yield* arrange("other-unnest", other, null);
       yield* arrange("b-under-a", b, a);
       yield* arrange("c-under-b", c, b);
       const updatedAtBefore = (yield* orchestrator.getThreadProjection(c)).thread.updatedAt;
@@ -4689,7 +4692,6 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         ["cycle", a, c, "cycle"],
         ["self", a, a, "itself"],
         ["missing", b, ThreadId.make("arrange-missing"), "does not exist"],
-        ["other-project", b, other, "another project"],
       ] as const) {
         const refused = yield* arrange(id, threadId, parentThreadId).pipe(Effect.flip);
         assert.instanceOf(refused, Orchestrator.OrchestratorDispatchError, id);
@@ -4728,58 +4730,55 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
-  it.effect(
-    "an arrangement waits for the project's other arrangements, so moves cannot race into a cycle",
-    () =>
-      Effect.gen(function* () {
-        const orchestrator = yield* Orchestrator.OrchestratorV2;
-        const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
-        const projectId = ProjectId.make("arrange-lock-project");
-        const [a, b] = ["a", "b"].map((id) => ThreadId.make(`arrange-lock-${id}`));
-        for (const threadId of [a!, b!]) {
-          yield* orchestrator.dispatch({
-            type: "thread.create",
-            createdBy: "user",
-            creationSource: "web",
-            commandId: CommandId.make(`${threadId}-create`),
-            threadId,
-            projectId,
-            title: threadId,
-            modelSelection,
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            branch: null,
-            worktreePath: null,
-          });
-        }
-        // Another move in this project is mid-validation.
-        const held = yield* Deferred.make<void>();
-        const release = yield* Deferred.make<void>();
-        const holder = yield* executor
-          .withArrangementLock(
-            projectId,
-            Deferred.succeed(held, undefined).pipe(Effect.andThen(Deferred.await(release))),
-          )
-          .pipe(Effect.forkScoped({ startImmediately: true }));
-        yield* Deferred.await(held);
-        const move = yield* orchestrator
-          .dispatch({
-            type: "thread.arrange",
-            commandId: CommandId.make("arrange-lock-a-under-b"),
-            threadId: a!,
-            parentThreadId: b!,
-          })
-          .pipe(Effect.forkScoped({ startImmediately: true }));
-        const arrangedParent = Effect.map(
-          orchestrator.getThreadProjection(a!),
-          (projection) => projection.thread.arrangedParentThreadId,
-        );
-        assert.isUndefined(yield* arrangedParent);
-        yield* Deferred.succeed(release, undefined);
-        yield* Fiber.join(holder);
-        yield* Fiber.join(move);
-        assert.equal(yield* arrangedParent, b);
-      }),
+  it.effect("an arrangement waits for other arrangements, so moves cannot race into a cycle", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+      const projectId = ProjectId.make("arrange-lock-project");
+      const [a, b] = ["a", "b"].map((id) => ThreadId.make(`arrange-lock-${id}`));
+      for (const threadId of [a!, b!]) {
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`${threadId}-create`),
+          threadId,
+          projectId,
+          title: threadId,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+        });
+      }
+      // Another move is mid-validation.
+      const held = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const holder = yield* executor
+        .withArrangementLock(
+          Deferred.succeed(held, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        )
+        .pipe(Effect.forkScoped({ startImmediately: true }));
+      yield* Deferred.await(held);
+      const move = yield* orchestrator
+        .dispatch({
+          type: "thread.arrange",
+          commandId: CommandId.make("arrange-lock-a-under-b"),
+          threadId: a!,
+          parentThreadId: b!,
+        })
+        .pipe(Effect.forkScoped({ startImmediately: true }));
+      const arrangedParent = Effect.map(
+        orchestrator.getThreadProjection(a!),
+        (projection) => projection.thread.arrangedParentThreadId,
+      );
+      assert.isUndefined(yield* arrangedParent);
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(holder);
+      yield* Fiber.join(move);
+      assert.equal(yield* arrangedParent, b);
+    }),
   );
 
   it.effect.each([
@@ -12540,11 +12539,10 @@ it.layer(layerSharedApplicationDataPlaneTest)("snooze projection", (it) => {
       const moved = shell.threads.find((thread) => thread.id === idleThreadId);
       assert.equal(moved?.projectId, folderProjectId);
       assert.isNull(moved?.worktreePath);
-      // Arrangement is per project: the moved thread arrives at the top level, and the thread
-      // nested under it stays behind, one level up.
-      assert.isNull(moved?.arrangedParentThreadId);
-      const left = shell.threads.find((thread) => thread.id === nestedThreadId);
-      assert.equal(left?.arrangedParentThreadId, busyThreadId);
+      // Arrangement spans projects, so the moved thread keeps its place and its nested thread.
+      assert.equal(moved?.arrangedParentThreadId, busyThreadId);
+      const nested = shell.threads.find((thread) => thread.id === nestedThreadId);
+      assert.equal(nested?.arrangedParentThreadId, idleThreadId);
       const stayed = shell.threads.find((thread) => thread.id === busyThreadId);
       assert.equal(stayed?.projectId, scratchProjectId);
     }),

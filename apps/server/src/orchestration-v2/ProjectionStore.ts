@@ -573,7 +573,6 @@ export interface ProjectionStoreV2Shape {
    * it, or never arranged and forked from it.
    */
   readonly listArrangedChildThreadIds: (
-    projectId: ProjectId,
     parentThreadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ThreadId>, ProjectionStoreV2Error>;
   readonly listAppOwnedChildThreadIds: (
@@ -6715,12 +6714,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         Effect.mapError(controlReadError(threadId)),
       );
     const listArrangedChildThreadIds: ProjectionStoreV2Shape["listArrangedChildThreadIds"] = (
-      projectId,
       parentThreadId,
     ) =>
       sql<{ readonly thread_id: string }>`SELECT thread_id
         FROM orchestration_v2_projection_threads
-        WHERE project_id = ${projectId} AND deleted_at IS NULL AND archived_at IS NULL
+        WHERE deleted_at IS NULL AND archived_at IS NULL
           AND (
             json_extract(payload_json, '$.arrangedParentThreadId') = ${parentThreadId}
             OR (

@@ -27,7 +27,7 @@ const ids = (rows: ReadonlyArray<{ readonly thread: { readonly id: string } }>) 
   rows.map((row) => row.thread.id);
 
 describe("arrangeThreads", () => {
-  it("nests children under listed parents and leaves the rest top level", () => {
+  it("nests children under listed parents, across projects, and leaves the rest top level", () => {
     const threads = [
       thread("root"),
       thread("child", "root"),
@@ -38,23 +38,24 @@ describe("arrangeThreads", () => {
     const arrangement = arrangeThreads(threads);
     expect(arrangement.parentKeyOf(key("grandchild"))).toBe(key("child"));
     expect(arrangement.parentKeyOf(key("orphan"))).toBeNull();
-    expect(arrangement.parentKeyOf(key("elsewhere"))).toBeNull();
+    expect(arrangement.parentKeyOf(key("elsewhere"))).toBe(key("root"));
     const roots = threads.filter((t) => arrangement.parentKeyOf(key(t.id)) === null);
     const rows = flattenArrangedThreads(roots, arrangement, () => false);
     expect(rows.map((row) => [row.thread.id, row.depth, row.childCount])).toEqual([
-      ["root", 0, 1],
+      ["root", 0, 2],
       ["child", 1, 1],
       ["grandchild", 2, 0],
+      ["elsewhere", 1, 0],
       ["orphan", 0, 0],
-      ["elsewhere", 0, 0],
     ]);
     expect(ids(flattenArrangedThreads(roots, arrangement, (k) => k === key("child")))).toEqual([
       "root",
       "child",
-      "orphan",
       "elsewhere",
+      "orphan",
     ]);
     expect(arrangedDescendants(key("root"), arrangement).map((t) => t.id)).toEqual([
+      "elsewhere",
       "child",
       "grandchild",
     ]);
@@ -84,7 +85,7 @@ describe("arrangeThreads", () => {
     ]);
   });
 
-  it("offers parents in the same project, never the thread or its descendants", () => {
+  it("offers parents in any project, never the thread or its descendants", () => {
     const threads = [
       thread("root"),
       thread("moving", "root"),
@@ -95,7 +96,7 @@ describe("arrangeThreads", () => {
     const moving = threads[1]!;
     expect(
       arrangeParentCandidates(moving, threads, arrangeThreads(threads)).map((t) => t.id),
-    ).toEqual(["root", "sibling"]);
+    ).toEqual(["root", "sibling", "elsewhere"]);
   });
 
   it("keeps a thread that needs the user out of a parked parent's shelf, with its own nested threads", () => {
