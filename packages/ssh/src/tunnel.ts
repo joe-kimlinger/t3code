@@ -56,6 +56,8 @@ import {
 const DEFAULT_REMOTE_PORT = 3773;
 const REMOTE_PORT_SCAN_WINDOW = 200;
 const SSH_READY_TIMEOUT_MS = 20_000;
+// `/` answers 503 on a server without built web assets, such as one run from source.
+const SSH_READINESS_PATH = "/.well-known/t3/environment";
 const SSH_READY_PROBE_TIMEOUT_MS = 1_000;
 // Probes through the forward pay several link round trips, about 4s at a 1s RTT.
 const SSH_TUNNEL_READY_PROBE_TIMEOUT_MS = 5_000;
@@ -340,7 +342,7 @@ function probe() {
       {
         hostname: "127.0.0.1",
         port,
-        path: "/",
+        path: "/.well-known/t3/environment",
         timeout: probeTimeoutMs,
       },
       (response) => {
@@ -1408,7 +1410,7 @@ const waitForHttpReady = (input: {
 }): Effect.Effect<void, SshReadinessError, HttpClient.HttpClient> =>
   waitForHttpReadyShared({
     baseUrl: input.baseUrl,
-    ...(input.path === undefined ? {} : { path: input.path }),
+    path: input.path ?? SSH_READINESS_PATH,
     ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
     ...(input.intervalMs === undefined ? {} : { intervalMs: input.intervalMs }),
     probeTimeoutMs: input.probeTimeoutMs ?? SSH_TUNNEL_READY_PROBE_TIMEOUT_MS,

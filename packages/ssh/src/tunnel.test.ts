@@ -100,10 +100,9 @@ function commandArgs(command: ChildProcess.Command): ReadonlyArray<string> {
 
 const ARCHIVE = { archiveVersion: "1.2.3-preview.20260911.4" } as const;
 
-// Emulates `t3 serve`: it takes the home owner lock at startup, then binds
-// once a second server has tried the same home (or after 2s), so a concurrent
-// launch always sees the home still unclaimed. Like the real server, it
-// publishes server-runtime.json after it starts answering HTTP, if at all.
+// Emulates `t3 serve` run from source: it takes the home owner lock, binds once
+// a second server has tried the home (or after 2s), answers 503 at `/` for lack
+// of web assets, and publishes server-runtime.json after answering, if at all.
 const fakeT3Serve = (publishDelayMs: number | null) => `const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
@@ -125,7 +124,11 @@ const serve = (tries) => {
     setTimeout(() => serve(tries - 1), 50);
     return;
   }
-  http.createServer((_, response) => response.end()).listen(port, "127.0.0.1", () => {
+  const handle = (request, response) => {
+    response.statusCode = request.url === "/" ? 503 : 200;
+    response.end();
+  };
+  http.createServer(handle).listen(port, "127.0.0.1", () => {
     const origin = "http://127.0.0.1:" + port;
     ${publishDelayMs === null ? "return;" : ""}
     setTimeout(() => {

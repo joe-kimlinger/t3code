@@ -65,7 +65,7 @@ const pickPort = Command.make("pick-port", {
 const probe = (port: number, probeTimeoutMs: number) =>
   new Promise<"ready" | "refused" | "not-ready">((resolve) => {
     const request = NodeHttp.get(
-      { hostname: "127.0.0.1", port, path: "/", timeout: probeTimeoutMs },
+      { hostname: "127.0.0.1", port, path: "/.well-known/t3/environment", timeout: probeTimeoutMs },
       (response) => {
         response.resume();
         response.once("end", () => {
