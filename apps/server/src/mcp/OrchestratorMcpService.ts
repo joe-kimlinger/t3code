@@ -71,7 +71,6 @@ import { getProviderOptionCurrentValue, withLegacyUltracodeEffort } from "@t3too
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { defaultThreadEnvMode } from "../project/defaultThreadEnvMode.ts";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import { threadPullRequestUpdatedAtMs } from "@t3tools/shared/threadPullRequests";
 import {
@@ -86,7 +85,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -1312,7 +1310,6 @@ const make = Effect.gen(function* () {
   const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
   const gitDriver = yield* GitVcsDriver.GitVcsDriver;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
-  const fileSystem = yield* FileSystem.FileSystem;
   const remoteDelegation = yield* RemoteDelegation.RemoteDelegation;
 
   const requireProject = (projectId: ProjectId) =>
@@ -1343,16 +1340,6 @@ const make = Effect.gen(function* () {
         `Project ${project.id} has no default model, so this caller cannot pick one for it.`,
       );
     return selection;
-  });
-  const projectDefaultThreadEnvMode = Effect.fn(
-    "OrchestratorMcpService.projectDefaultThreadEnvMode",
-  )(function* (project: Effect.Success<ReturnType<typeof requireProject>>) {
-    const settings = yield* serverSettings.getSettings.pipe(Effect.option);
-    if (Option.isNone(settings)) return "local" as const;
-    return yield* defaultThreadEnvMode(
-      resolveProjectSettings(settings.value, project.id, project).settings.defaultThreadEnvMode,
-      project.workspaceRoot,
-    ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
   });
   const secretRequests = yield* SecretRequests.SecretRequests;
 
@@ -2887,59 +2874,35 @@ const make = Effect.gen(function* () {
         parent.thread.interactionMode,
         input.interactionMode,
       );
-      // An omitted isolation follows the new-threads-in-a-worktree default, and stays shared
-      // wherever that default cannot apply, so delegation never fails on a default alone.
-      const defaulted = input.isolation === undefined;
-      const project =
-        input.isolation === "shared" || isRetryOfAcceptedDelegation
-          ? undefined
-          : defaulted
-            ? yield* requireProject(parent.thread.projectId).pipe(
-                Effect.orElseSucceed(() => undefined),
-              )
-            : yield* requireProject(parent.thread.projectId);
-      const isolation =
-        input.isolation ??
-        (project !== undefined && (yield* projectDefaultThreadEnvMode(project)) === "worktree"
-          ? "worktree"
-          : "shared");
       let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
-      if (project !== undefined && isolation === "worktree") {
-        const fromParentCommit = Effect.gen(function* () {
-          const base = yield* gitDriver
-            .resolveCommit({
-              cwd: parent.thread.worktreePath ?? project.workspaceRoot,
-              revision: "HEAD",
-            })
+      if (input.isolation === "worktree" && !isRetryOfAcceptedDelegation) {
+        const project = yield* requireProject(parent.thread.projectId);
+        const base = yield* gitDriver
+          .resolveCommit({
+            cwd: parent.thread.worktreePath ?? project.workspaceRoot,
+            revision: "HEAD",
+          })
+          .pipe(
+            Effect.mapError(() =>
+              failure("invalid_request", "Unable to resolve the parent checkout commit."),
+            ),
+          );
+        // Launch preparation creates the worktree from the project root, so a
+        // parent checkout in another repository (such as a Git folder inside
+        // Scratch) would hand it a commit it cannot find.
+        if (parent.thread.worktreePath !== null) {
+          yield* gitDriver
+            .resolveCommit({ cwd: project.workspaceRoot, revision: base.commitSha })
             .pipe(
               Effect.mapError(() =>
-                failure("invalid_request", "Unable to resolve the parent checkout commit."),
+                failure(
+                  "invalid_request",
+                  `Isolation "worktree" creates the child checkout in project "${project.title}" (${project.workspaceRoot}), which does not contain the parent checkout's commit. Use isolation "shared" to work in the parent's checkout.`,
+                ),
               ),
             );
-          // Launch preparation creates the worktree from the project root, so a
-          // parent checkout in another repository (such as a Git folder inside
-          // Scratch) would hand it a commit it cannot find.
-          if (parent.thread.worktreePath !== null) {
-            yield* gitDriver
-              .resolveCommit({ cwd: project.workspaceRoot, revision: base.commitSha })
-              .pipe(
-                Effect.mapError(() =>
-                  failure(
-                    "invalid_request",
-                    `Isolation "worktree" creates the child checkout in project "${project.title}" (${project.workspaceRoot}), which does not contain the parent checkout's commit. Use isolation "shared" to work in the parent's checkout.`,
-                  ),
-                ),
-              );
-          }
-          return {
-            type: "worktree" as const,
-            baseRef: base.commitSha,
-            startFromOrigin: false,
-          };
-        });
-        workspaceStrategy = yield* defaulted
-          ? fromParentCommit.pipe(Effect.orElseSucceed(() => undefined))
-          : fromParentCommit;
+        }
+        workspaceStrategy = { type: "worktree", baseRef: base.commitSha, startFromOrigin: false };
       }
       const parentNodeId = parentRun.rootNodeId;
       // The command commits the child's preparing run, which only this call
@@ -3876,5 +3839,4 @@ export const layer: Layer.Layer<
   | SecretRequests.SecretRequests
   | ServerSettings.ServerSettingsService
   | RemoteDelegation.RemoteDelegation
-  | FileSystem.FileSystem
 > = Layer.effect(OrchestratorMcpService, make);

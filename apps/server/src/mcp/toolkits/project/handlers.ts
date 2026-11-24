@@ -7,6 +7,7 @@ import {
   ProjectId,
   type Project as ProjectRecord,
   type ServerProvider,
+  T3_PROJECT_FILE_NAME,
 } from "@t3tools/contracts";
 import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
@@ -28,9 +29,12 @@ import * as ServerSettings from "../../../serverSettings.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as DateTime from "effect/DateTime";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import {
+  resolveProjectFileBackedSetting,
+  resolveProjectSettings,
+} from "@t3tools/shared/projectSettings";
 import { resolveProjectScripts } from "@t3tools/shared/projectScripts";
-import { defaultThreadEnvMode } from "../../../project/defaultThreadEnvMode.ts";
+import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { resolveRuntimeMode } from "../../delegatedTaskModes.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -96,6 +100,21 @@ const assertProjectWorktree = Effect.fn("mcp.assertProjectWorktree")(function* (
       message:
         "worktreePath must be one of the project's git worktrees. t3_worktree_list shows them.",
     });
+});
+
+/** The composer falls back to the project's t3.json when no setting picks the mode. */
+const projectFileThreadEnvMode = Effect.fn("mcp.projectFileThreadEnvMode")(function* (
+  workspaceRoot: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const contents = yield* fileSystem
+    .readFileString(`${workspaceRoot}/${T3_PROJECT_FILE_NAME}`)
+    .pipe(Effect.orElseSucceed(() => null));
+  return resolveProjectFileBackedSetting(
+    "defaultThreadEnvMode",
+    null,
+    contents === null ? null : parseT3ProjectFile(contents),
+  ).value;
 });
 
 // Anchored to the fatal line: other diagnostics, such as a dubious-ownership refusal, quote the path.
@@ -313,16 +332,15 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                   (settings) => resolveProjectSettings(settings, projectId, project).settings,
                 ),
               );
-        // A launch that names no workspace follows the new-threads-in-a-worktree default, as
-        // the composer does, so agent-started threads do not share a checkout by accident.
+        // An outside caller that names no workspace follows the new-threads-in-a-worktree
+        // default, as the composer does.
         const requestedStrategy =
           input.workspaceStrategy === undefined &&
+          caller === undefined &&
           project !== undefined &&
           projectSettings !== undefined &&
-          (yield* defaultThreadEnvMode(
-            projectSettings.defaultThreadEnvMode,
-            project.workspaceRoot,
-          )) === "worktree"
+          (projectSettings.defaultThreadEnvMode ??
+            (yield* projectFileThreadEnvMode(project.workspaceRoot))) === "worktree"
             ? yield* defaultWorktreeStrategy(project.workspaceRoot)
             : input.workspaceStrategy;
         // An omitted startFromOrigin follows the new-worktree setting, as the composer and

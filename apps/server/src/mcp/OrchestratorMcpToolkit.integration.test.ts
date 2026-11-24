@@ -281,10 +281,7 @@ describe("orchestrator MCP toolkit", () => {
         Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
         Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
         Layer.provide(
-          Layer.mock(ProjectService.ProjectService)({
-            getById: () => Effect.succeedNone,
-            workspaceScanDirectory: Effect.succeed,
-          }),
+          Layer.mock(ProjectService.ProjectService)({ workspaceScanDirectory: Effect.succeed }),
         ),
         Layer.provideMerge(
           SecretRequests.layer.pipe(
