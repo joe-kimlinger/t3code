@@ -3459,8 +3459,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
-                key="sidebar-thread-search-tooltips-150"
-                delay={150}
+                key="sidebar-thread-search-tooltips-700"
+                delay={700}
                 closeDelay={0}
                 timeout={400}
               >
@@ -3594,8 +3594,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           ) : null}
           {!isSearchingThreads ? (
             <TooltipProvider
-              key="sidebar-thread-tooltips-150"
-              delay={150}
+              key="sidebar-thread-tooltips-700"
+              delay={700}
               closeDelay={0}
               timeout={400}
             >
