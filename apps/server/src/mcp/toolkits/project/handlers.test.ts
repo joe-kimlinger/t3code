@@ -45,6 +45,7 @@ import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../../../vcs/VcsProcess.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
+import { liveThreadShell } from "../../McpToolAccess.testkit.ts";
 import * as ProjectHandlers from "./handlers.ts";
 import { ProjectToolkit } from "./tools.ts";
 
@@ -64,6 +65,8 @@ const clientLaunchHarness = (input: {
   readonly hostedAppUrl?: string;
   /** The orchestrator refuses the new thread's mode, as under a managed ceiling. */
   readonly refusedByCeiling?: true;
+  /** An agent in a thread of the project calls, instead of an outside client. */
+  readonly fromThread?: true;
 }) => {
   const projectId = ProjectId.make("project:client-target");
   const modelSelection = {
@@ -74,6 +77,7 @@ const clientLaunchHarness = (input: {
   const projectDefaults: { model: ModelSelection | null } = {
     model: input.overrideModel === undefined ? modelSelection : null,
   };
+  const callerThread = { ...liveThreadShell(ThreadId.make("thread:caller")), projectId };
   const layerDependencies = Layer.mergeAll(
     Layer.mock(ProviderRegistry.ProviderRegistry)({
       getProviders: Effect.succeed(input.providers ?? []),
@@ -107,19 +111,28 @@ const clientLaunchHarness = (input: {
     Layer.succeed(McpInvocationContext.McpInvocationContext, {
       environmentId: EnvironmentId.make("environment"),
       requestNamespace: "client:session-1",
-      thread: undefined,
-      client: {
-        sessionId: "session-1",
-        label: "Claude Code",
-        access: input.runtimeModeCeiling,
-        hostedAppUrl: input.hostedAppUrl,
-      },
+      thread: input.fromThread
+        ? {
+            threadId: callerThread.id,
+            providerSessionId: "session-1",
+            providerInstanceId: callerThread.providerInstanceId,
+          }
+        : undefined,
+      client: input.fromThread
+        ? undefined
+        : {
+            sessionId: "session-1",
+            label: "Claude Code",
+            access: input.runtimeModeCeiling,
+            hostedAppUrl: input.hostedAppUrl,
+          },
       issuedAt: 0,
       capabilities: new Set(["orchestration" as const]),
     }),
     Layer.mock(ThreadManagement.ThreadManagementService)({
       // A thread exists once a launch started it.
       getThreadShell: (threadId) => {
+        if (threadId === callerThread.id) return Effect.succeed(callerThread);
         const launch = input.launched.find((candidate) => candidate.threadId === threadId);
         return Effect.succeed(
           launch === undefined
@@ -719,7 +732,11 @@ it.effect("a worktree launch that omits startFromOrigin follows the new-worktree
 it.effect("a launch that omits its workspace follows the new-threads-in-a-worktree default", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    for (const source of ["setting", "t3.json"] as const) {
+    for (const [source, caller] of [
+      ["setting", "client"],
+      ["t3.json", "client"],
+      ["setting", "thread"],
+    ] as const) {
       const repo = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-launch-env-mode-" });
       const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
       const { projectId, dependencies } = clientLaunchHarness({
@@ -727,6 +744,7 @@ it.effect("a launch that omits its workspace follows the new-threads-in-a-worktr
         launched,
         workspaceRoot: repo,
         ...(source === "setting" ? { defaultThreadEnvMode: "worktree" as const } : {}),
+        ...(caller === "thread" ? { fromThread: true as const } : {}),
       });
       const git = yield* GitVcsDriver.GitVcsDriver.pipe(Effect.provide(dependencies));
       for (const args of [
@@ -759,7 +777,7 @@ it.effect("a launch that omits its workspace follows the new-threads-in-a-worktr
 
       expect(
         launched.map((launch) => launch.workspaceStrategy.type),
-        source,
+        `${source} from ${caller}`,
       ).toEqual(["worktree", "root"]);
     }
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

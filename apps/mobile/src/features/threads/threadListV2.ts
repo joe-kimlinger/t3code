@@ -899,8 +899,8 @@ export function buildThreadListV2Items(input: {
     };
   }
 
-  // Nested threads render under their parent, in its section, so only top-level threads sort,
-  // except one a parked parent would hide while it still needs the user.
+  // Nested threads render under their parent, in its section, so only top-level threads sort;
+  // one settled or snoozed apart from its parent is top level in its own section.
   const arrangement = arrangeThreadsKeepingUnparked(listedThreads, (thread) =>
     isParkedForList(thread, { ...input, queuedThreadKeys }),
   );

@@ -547,12 +547,12 @@ describe("buildThreadListV2Items", () => {
     expect(layout.snoozedCount).toBe(0);
   });
 
-  it("lists nested threads under their parent in its shelf, outside any section order", () => {
+  it("lists nested threads under their parent in its shelf unless their own state parks them apart", () => {
     const parent = ThreadId.make("parent");
     const threads = [
       makeThread({ id: ThreadId.make("other"), title: "Other", activeOrderKey: "t" }),
       makeThread({ id: parent, title: "Parent", activeOrderKey: "f" }),
-      // A settled child still follows its active parent.
+      // A settled child leaves its active parent for the settled shelf; its active child stays out.
       makeThread({
         id: ThreadId.make("child"),
         title: "Child",
@@ -573,12 +573,12 @@ describe("buildThreadListV2Items", () => {
       now: NOW,
     });
     expect(layout.items.map((item) => [item.thread.id, item.depth, item.variant])).toEqual([
+      ["grandchild", 0, "card"],
       ["parent", 0, "card"],
-      ["child", 1, "card"],
-      ["grandchild", 2, "card"],
       ["other", 0, "card"],
+      ["child", 0, "slim"],
     ]);
-    expect(layout.settledCount).toBe(0);
+    expect(layout.settledCount).toBe(1);
     // Under a settled parent, a child that is still active leaves the closed shelf.
     const settledParent = buildThreadListV2Items({
       threads: [
@@ -602,7 +602,7 @@ describe("buildThreadListV2Items", () => {
       getThreadListV2OrderedSection({ threads, section: "active", now: NOW }).map(
         (thread) => thread.id,
       ),
-    ).toEqual(["parent", "other"]);
+    ).toEqual(["grandchild", "parent", "other"]);
   });
 
   it("partitions settled threads into a slim shelf", () => {

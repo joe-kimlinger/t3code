@@ -690,8 +690,8 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   } = input;
   const preciseNow = new Date().toISOString();
   const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent);
-  // Nested threads follow their parent's section, so only top-level threads are partitioned,
-  // except one a parked parent would hide while it still needs the user.
+  // Nested threads follow their parent's section, so only top-level threads are partitioned;
+  // one settled or snoozed apart from its parent is top level in its own section.
   const arrangement = arrangeThreadsKeepingUnparked(
     visible,
     (thread) =>

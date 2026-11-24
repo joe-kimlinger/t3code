@@ -91,9 +91,9 @@ export function arrangeThreads<T extends ArrangeableThread>(
 }
 
 /**
- * Nests `threads` like `arrangeThreads`, but a thread whose top-level ancestor is parked
- * (settled or snoozed) while it is not stays at the top level, so work that needs the user
- * is never folded away inside a closed shelf.
+ * Nests `threads` like `arrangeThreads`, but a thread that is parked (settled or snoozed) while
+ * the thread it would sit under is not, or the reverse, goes to the top level, so each thread
+ * shows in the section its own state picks.
  */
 export function arrangeThreadsKeepingUnparked<T extends ArrangeableThread>(
   threads: readonly T[],
@@ -101,21 +101,19 @@ export function arrangeThreadsKeepingUnparked<T extends ArrangeableThread>(
 ): ThreadArrangement<T> {
   const arrangement = arrangeThreads(threads);
   const byKey = new Map(threads.map((thread) => [arrangedThreadKey(thread), thread] as const));
-  const rootKeyCache = new Map<string, string>();
-  const rootKeyOf = (key: string): string => {
-    const cached = rootKeyCache.get(key);
-    if (cached !== undefined) return cached;
-    const parentKey = arrangement.parentKeyOf(key);
-    const rootKey = parentKey === null ? key : rootKeyOf(parentKey);
-    rootKeyCache.set(key, rootKey);
-    return rootKey;
-  };
   const detached = new Set<string>();
-  for (const [key, thread] of byKey) {
-    if (arrangement.parentKeyOf(key) === null || isParked(thread)) continue;
-    const root = byKey.get(rootKeyOf(key));
-    if (root !== undefined && isParked(root)) detached.add(key);
-  }
+  const parkedCache = new Map<string, boolean>();
+  // Whether the row a thread lands in sits in a parked section.
+  const landsParked = (key: string): boolean => {
+    const cached = parkedCache.get(key);
+    if (cached !== undefined) return cached;
+    const parked = isParked(byKey.get(key)!);
+    const parentKey = arrangement.parentKeyOf(key);
+    if (parentKey !== null && landsParked(parentKey) !== parked) detached.add(key);
+    parkedCache.set(key, parked);
+    return parked;
+  };
+  for (const key of byKey.keys()) landsParked(key);
   return detached.size === 0 ? arrangement : arrangeThreads(threads, detached);
 }
 
