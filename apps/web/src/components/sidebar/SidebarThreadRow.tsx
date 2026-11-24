@@ -1355,6 +1355,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     issueBadge === null &&
     diff === null &&
     runningTerminalIds.length === 0;
+  const projectLine = Boolean(props.projectDisplayName && showProject);
   const titleRegenerating = isRegeneratingTitle ? (
     <span role="status" className="sr-only">
       <T>Regenerating title</T>
@@ -1628,8 +1629,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       // The hints are the rendered heights inside py-0.5. Revealing the open thread measures rows
       // that have not rendered yet, so a hint off by a pixel lands it a pixel short per row above.
       className={cn(
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_54px]",
-        metaLineEmpty && "[contain-intrinsic-size:auto_36px]",
+        "list-none py-0.5 [content-visibility:auto]",
+        projectLine && !metaLineEmpty
+          ? "[contain-intrinsic-size:auto_72px]"
+          : projectLine || !metaLineEmpty
+            ? "[contain-intrinsic-size:auto_54px]"
+            : "[contain-intrinsic-size:auto_36px]",
         sortable?.isDragging ? "relative z-20" : nestingDepth > 0 && "relative",
       )}
     >
@@ -1660,17 +1665,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               "relative z-10 px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
             )}
           >
+            {projectLine ? (
+              <div className="mb-0.5 h-4 truncate text-secondary-label text-xs">
+                {props.projectDisplayName}
+              </div>
+            ) : null}
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {nestedToggle}
               {draftIndicator}
               {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
               {pinIndicator}
-              {props.projectDisplayName && showProject ? (
-                <span className="max-w-24 shrink-0 truncate font-normal text-secondary-label text-xs">
-                  {props.projectDisplayName}
-                </span>
-              ) : null}
               {title}
               {titleRegenerating}
               {titleLineIcons}
