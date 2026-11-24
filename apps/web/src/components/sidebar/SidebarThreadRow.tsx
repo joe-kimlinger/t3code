@@ -596,6 +596,8 @@ type SidebarThreadRowProps = {
   dragOverPinned: boolean;
   /** 0 for a top-level row. */
   nestingDepth?: number;
+  /** False when the row sits under a parent in the same project, which already names it. */
+  showProject?: boolean;
   nestedChildCount?: number;
   nestedChildrenCollapsed?: boolean;
   /** The most urgent state among nested threads a collapsed row hides. */
@@ -1049,6 +1051,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
   const sortable = props.sortable;
   const nestingDepth = props.nestingDepth ?? 0;
+  const showProject = props.showProject ?? nestingDepth === 0;
   const nestingIndent =
     nestingDepth > 0
       ? { paddingInlineStart: `${Math.min(nestingDepth, SIDEBAR_MAX_INDENT_DEPTH) * 1.5}rem` }
@@ -1450,7 +1453,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       "opacity-40 grayscale group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:grayscale-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
                   )}
                 >
-                  {props.projectDisplayName ? (
+                  {props.projectDisplayName && showProject ? (
                     <span className="max-w-24 truncate text-secondary-label text-xs">
                       {props.projectDisplayName}
                     </span>
@@ -1655,7 +1658,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
               {pinIndicator}
-              {props.projectDisplayName ? (
+              {props.projectDisplayName && showProject ? (
                 <span
                   className={cn("min-w-0 flex-1 truncate font-normal text-secondary-label text-xs")}
                 >

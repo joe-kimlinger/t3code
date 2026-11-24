@@ -3639,6 +3639,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           nestedChildCount > 0 && threadChildrenCollapsedByKey[threadKey] === true;
                         const isDraggedNesting =
                           dragState?.activeKey === threadKey && dragNestTarget !== null;
+                        const parentKey = isDraggedNesting
+                          ? dragNestTarget!.parentKey
+                          : arrangement.parentKeyOf(threadKey);
+                        const parent = parentKey ? threadByKey.get(parentKey) : undefined;
                         const isCard =
                           section === "active" || section === "pinned" || section === "working";
                         const rowVariant = folderRow
@@ -3689,6 +3693,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               isDraggedNesting
                                 ? dragNestTarget!.depth
                                 : (rowDepthByKey.get(threadKey) ?? 0)
+                            }
+                            showProject={
+                              parent === undefined ||
+                              parent.environmentId !== thread.environmentId ||
+                              parent.projectId !== thread.projectId
                             }
                             nestedChildCount={nestedChildCount}
                             nestedChildrenCollapsed={nestedChildrenCollapsed}
