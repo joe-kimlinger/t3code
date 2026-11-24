@@ -1355,8 +1355,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     issueBadge === null &&
     diff === null &&
     runningTerminalIds.length === 0;
-  // A nested row in its parent's project has no label for the first line, so its title moves up.
-  const singleLine = !(props.projectDisplayName && showProject) && metaLineEmpty;
   const titleRegenerating = isRegeneratingTitle ? (
     <span role="status" className="sr-only">
       <T>Regenerating title</T>
@@ -1630,9 +1628,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       // The hints are the rendered heights inside py-0.5. Revealing the open thread measures rows
       // that have not rendered yet, so a hint off by a pixel lands it a pixel short per row above.
       className={cn(
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
-        metaLineEmpty && "[contain-intrinsic-size:auto_60px]",
-        singleLine && "[contain-intrinsic-size:auto_36px]",
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_54px]",
+        metaLineEmpty && "[contain-intrinsic-size:auto_36px]",
         sortable?.isDragging ? "relative z-20" : nestingDepth > 0 && "relative",
       )}
     >
@@ -1660,8 +1657,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         >
           <div
             className={cn(
-              "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
-              (metaLineEmpty || singleLine) && "h-auto",
+              "relative z-10 px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
             )}
           >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
@@ -1670,27 +1666,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
               {pinIndicator}
-              {singleLine ? (
-                <>
-                  {title}
-                  {titleRegenerating}
-                  {titleLineIcons}
-                </>
-              ) : props.projectDisplayName && showProject ? (
-                <span
-                  className={cn("min-w-0 flex-1 truncate font-normal text-secondary-label text-xs")}
-                >
+              {props.projectDisplayName && showProject ? (
+                <span className="max-w-24 shrink-0 truncate font-normal text-secondary-label text-xs">
                   {props.projectDisplayName}
                 </span>
-              ) : (
-                <span className="flex-1" />
-              )}
+              ) : null}
+              {title}
+              {titleRegenerating}
+              {titleLineIcons}
               {sortable?.isDragging ? (
                 dragDestination
               ) : (
                 <span
                   className={cn(
-                    "group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs",
+                    "group/sidebar-status-slot relative ml-auto flex h-5 shrink-0 items-stretch justify-end text-xs",
                     props.sweepAction !== null && "hidden",
                     jumpHintLabel && JUMP_HINT_SLOT_CLASS_NAME,
                   )}
@@ -1829,13 +1818,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               )}
               {props.sweepAction !== null ? dragDestination : null}
             </div>
-            {singleLine ? null : (
-              <div className="mt-1 flex min-w-0 items-center gap-1.5">
-                {title}
-                {titleRegenerating}
-                {titleLineIcons}
-              </div>
-            )}
             {metaLine}
           </div>
         </TooltipTrigger>
