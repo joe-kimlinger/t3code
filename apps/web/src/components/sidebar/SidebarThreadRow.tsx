@@ -6,16 +6,10 @@ import { discardComposerDraft } from "../../lib/discardComposerDraft";
 import { contextMenuSourceOf } from "../../contextMenuSource";
 import { requestCustomSnooze } from "../CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
-import { useDeadlinePassed } from "~/hooks/useDeadline";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/client-runtime/thread-pull-requests";
 import { useDraggable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  canSnooze,
-  hasQueuedTurnStart,
-  QUEUED_TURN_START_GRACE_MS,
-} from "@t3tools/client-runtime/state/thread-settled";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import {
   resolveSettledThreadTimestamp,
@@ -644,7 +638,6 @@ type SidebarThreadRowProps = {
     event: PointerEvent,
   ) => void;
   onUnsettle: (threadRef: ScopedThreadRef) => void;
-  onSnooze: (threadRef: ScopedThreadRef, preset: Pick<SnoozePreset, "snoozedUntil">) => void;
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
@@ -706,7 +699,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     onRenameTitleChange,
     onSettle,
     onActionSweepStart,
-    onSnooze,
     onStartRename,
     onThreadActivate,
     onThreadClick,
@@ -979,41 +971,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     event.stopPropagation();
     onUnpin(threadRef);
   };
-  const handleSnoozePreset = (preset: Pick<SnoozePreset, "snoozedUntil">) => {
-    onSnooze(threadRef, preset);
-  };
-  const [snoozeMenuOpenRaw, setSnoozeMenuOpen] = useState(false);
-  // The React Compiler caches render results on their inputs, so a clock read
-  // here would stay frozen until `thread` changes and a queued-turn gate would
-  // never reopen. The gate's clock is state, reset with the thread.
-  const [snoozeGateClock, setSnoozeGateClock] = useState(() => ({
-    thread,
-    now: new Date().toISOString(),
-  }));
-  if (snoozeGateClock.thread !== thread) {
-    // oxlint-disable-next-line react/purity -- Reseeds the snooze gate clock only in the render-phase adjustment that runs when the thread changes.
-    setSnoozeGateClock({ thread, now: new Date().toISOString() });
-  }
-  const snoozeGateNow = snoozeGateClock.now;
-  const snoozeGateExpiryMs = hasQueuedTurnStart(thread, { now: snoozeGateNow })
-    ? Date.parse(thread.latestUserMessageAt ?? "") + QUEUED_TURN_START_GRACE_MS
-    : Number.NaN;
-  // A gate still closed past its expiry is held by runtime status, not time,
-  // so no clock tick can open it.
-  const snoozeGateOpensAt =
-    Number.isFinite(snoozeGateExpiryMs) && snoozeGateExpiryMs > Date.parse(snoozeGateNow)
-      ? snoozeGateExpiryMs + 50
-      : null;
-  const snoozeGateOpened = useDeadlinePassed(snoozeGateOpensAt);
-  if (snoozeGateOpened && snoozeGateOpensAt !== null) {
-    setSnoozeGateClock({ thread, now: new Date(snoozeGateOpensAt).toISOString() });
-  }
-  const showSnoozeButton =
-    canOperateThread && props.snoozeSupported && canSnooze(thread, { now: snoozeGateNow });
-  // Closing here, not just masking, keeps the menu from reopening when the button returns.
-  if (snoozeMenuOpenRaw && !showSnoozeButton) setSnoozeMenuOpen(false);
-  const snoozeMenuOpen = snoozeMenuOpenRaw && showSnoozeButton;
-  const jumpHintLabel = snoozeMenuOpen ? null : props.jumpLabel;
+  const jumpHintLabel = props.jumpLabel;
   const handlePrClick = (event: ReactMouseEvent<HTMLElement>, targetUrl?: string) => {
     const url = targetUrl ?? pr?.url ?? currentLinkedPr?.url;
     if (!url) return;
@@ -1054,19 +1012,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     nestingDepth > 0
       ? { paddingInlineStart: `${Math.min(nestingDepth, SIDEBAR_MAX_INDENT_DEPTH) * 1.5}rem` }
       : undefined;
-  // One guide per level, down the middle of each indent, so a parent's nested rows read as a run.
-  const nestingGuides =
-    nestingDepth > 0
-      ? Array.from({ length: Math.min(nestingDepth, SIDEBAR_MAX_INDENT_DEPTH) }, (_, level) => (
-          <span
-            key={level}
-            aria-hidden
-            data-testid="sidebar-nesting-guide"
-            className="pointer-events-none absolute inset-y-0 w-px bg-muted-foreground/30"
-            style={{ insetInlineStart: `${level * 1.5 + 0.75}rem` }}
-          />
-        ))
-      : null;
   const nestedChildCount = props.nestedChildCount ?? 0;
   const { onToggleNestedChildren } = props;
   const nestedToggle =
@@ -1387,6 +1332,22 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       </span>
     </div>
   );
+  const cardBadges = (
+    <span className="inline-flex shrink-0 items-center gap-1.5 text-secondary-label text-xs">
+      {showsScratchMachine ? (
+        <EnvironmentMachineIcon aria-hidden kind={props.environmentMachine} className="size-3" />
+      ) : null}
+      {terminalStatusIcon}
+      {prBadge}
+      {issueBadge}
+      <span aria-hidden className="inline-flex items-center">
+        <SidebarProviderStack
+          thread={thread}
+          providerEntryByInstanceId={props.providerEntryByInstanceId}
+        />
+      </span>
+    </span>
+  );
   const titleLineIcons = metaLineEmpty ? (
     <span aria-hidden className="inline-flex shrink-0 items-center gap-1">
       <SidebarProviderStack
@@ -1410,7 +1371,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           sortable?.isDragging ? "relative z-20" : nestingDepth > 0 && "relative",
         )}
       >
-        {nestingGuides}
         <Tooltip disabled={isRenaming || sortable?.isDragging}>
           <TooltipTrigger
             render={
@@ -1620,16 +1580,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       // that have not rendered yet, so a hint off by a pixel lands it a pixel short per row above.
       className={cn(
         "list-none py-0.5 [content-visibility:auto]",
-        projectLine && !metaLineEmpty
-          ? "[contain-intrinsic-size:auto_72px]"
-          : projectLine || !metaLineEmpty
-            ? "[contain-intrinsic-size:auto_54px]"
-            : "[contain-intrinsic-size:auto_36px]",
+        projectLine ? "[contain-intrinsic-size:auto_54px]" : "[contain-intrinsic-size:auto_36px]",
         sortable?.isDragging ? "relative z-20" : nestingDepth > 0 && "relative",
       )}
     >
-      {nestingGuides}
-      <Tooltip disabled={isRenaming || snoozeMenuOpen || sortable?.isDragging}>
+      <Tooltip disabled={isRenaming || sortable?.isDragging}>
         <TooltipTrigger
           render={
             <div
@@ -1663,16 +1618,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 </div>
               ) : null}
               <span className="col-start-1 me-1.5 flex items-center gap-1.5 empty:hidden">
-                {nestedToggle}
                 {draftIndicator}
                 {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
                 {pinIndicator}
               </span>
               <div className="col-start-2 flex h-5 min-w-0 items-center gap-1.5">
-                {title}
+                {/* The chevron follows the title, so the title must not grow past its text. */}
+                <span className="flex min-w-0 flex-1 items-center gap-1 [&>:first-child]:flex-initial">
+                  {title}
+                  {nestedToggle}
+                </span>
                 {titleRegenerating}
-                {titleLineIcons}
+                {cardBadges}
                 {sortable?.isDragging ? (
                   dragDestination
                 ) : (
@@ -1689,7 +1647,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           ? "pointer-events-auto"
                           : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:absolute group-any-hover/sidebar-row:right-0 group-any-hover/sidebar-row:opacity-0",
                         "flex items-center self-center justify-self-end tabular-nums text-secondary-label",
-                        snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
                       )}
                     >
                       {topStatus ? (
@@ -1726,7 +1683,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             {/* Not a live region: a collapsed sidebar is inert, so
                             BackgroundThreadAnnouncer and the open thread's
                             timeline speak status changes instead. */}
-                            {topStatus.icon === "done" ? (
+                            {topStatus.icon === "done" ||
+                            topStatus.icon === "working" ||
+                            topStatus.icon === "waiting" ? (
                               <span className="sr-only">{topStatus.label}</span>
                             ) : (
                               topStatus.label
@@ -1752,13 +1711,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         <RelativeTimeLabel timestamp={resolveThreadActivityTimestamp(thread)} />
                       )}
                     </span>
-                    {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
+                    {props.settlementSupported || hasUnsentDraft ? (
                       <span
                         className={cn(
                           // Mouse clicks leave Settle focused; focus-within would pin controls over
                           // the status label after the pointer leaves. Use focus-visible instead.
                           "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:static group-any-hover/sidebar-row:opacity-100",
-                          snoozeMenuOpen && "pointer-events-auto static opacity-100",
                         )}
                       >
                         {hasUnsentDraft ? (
@@ -1780,15 +1738,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             </TooltipPopup>
                           </Tooltip>
                         ) : null}
-                        {showSnoozeButton ? (
-                          <SnoozeMenuButton
-                            open={snoozeMenuOpen}
-                            onOpenChange={setSnoozeMenuOpen}
-                            onSnooze={handleSnoozePreset}
-                            timestampFormat={props.timestampFormat}
-                            environmentId={thread.environmentId}
-                          />
-                        ) : null}
                         {props.settlementSupported ? (
                           <Tooltip>
                             <TooltipTrigger
@@ -1803,7 +1752,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                               }
                             >
                               <CheckIcon className="size-3.5" />
-                              <T>Settle</T>
                             </TooltipTrigger>
                             <TooltipPopup>
                               <T>Settle thread</T>
@@ -1817,7 +1765,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 )}
                 {props.sweepAction !== null ? dragDestination : null}
               </div>
-              {metaLine ? <div className="col-start-2 min-w-0">{metaLine}</div> : null}
             </div>
           </div>
         </TooltipTrigger>
