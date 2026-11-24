@@ -972,6 +972,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     onUnpin(threadRef);
   };
   const jumpHintLabel = props.jumpLabel;
+  // Nested threads settle from the context menu; a hover button on every child is noise.
+  const showSettleButton = props.settlementSupported && !props.nestingDepth;
   const handlePrClick = (event: ReactMouseEvent<HTMLElement>, targetUrl?: string) => {
     const url = targetUrl ?? pr?.url ?? currentLinkedPr?.url;
     if (!url) return;
@@ -1711,7 +1713,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         <RelativeTimeLabel timestamp={resolveThreadActivityTimestamp(thread)} />
                       )}
                     </span>
-                    {props.settlementSupported || hasUnsentDraft ? (
+                    {showSettleButton || hasUnsentDraft ? (
                       <span
                         className={cn(
                           // Mouse clicks leave Settle focused; focus-within would pin controls over
@@ -1738,7 +1740,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             </TooltipPopup>
                           </Tooltip>
                         ) : null}
-                        {props.settlementSupported ? (
+                        {showSettleButton ? (
                           <Tooltip>
                             <TooltipTrigger
                               render={
