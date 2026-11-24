@@ -2677,6 +2677,102 @@ describe("OrchestratorMcpService provider resolution", () => {
     }),
   );
 
+  it.effect.each([
+    ["worktree", undefined, "worktree"],
+    ["worktree", "shared", "shared"],
+    ["local", undefined, "shared"],
+    ["local", "worktree", "worktree"],
+    // A defaulted worktree that Git cannot seed stays shared rather than failing.
+    ["worktree", undefined, "shared", "no commit"],
+  ] as const)(
+    "a %s default with isolation %s delegates into a %s checkout",
+    ([defaultThreadEnvMode, isolation, expected, git]) =>
+      Effect.gen(function* () {
+        const commands: Array<{ readonly workspaceStrategy?: unknown }> = [];
+        const task = {
+          id: taskId,
+          threadId: parentThreadId,
+          origin: "app_owned",
+          childThreadId,
+          providerInstanceId: codexInstanceId,
+          model: "gpt-5.4",
+          status: "running",
+          result: null,
+        };
+        const dependencies = Layer.mergeAll(
+          NodeServices.layer,
+          NodeCrypto.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            hasReceipt: () => Effect.succeed(false),
+            getThreadRecords: (threadId) =>
+              Effect.succeed(
+                threadId === parentThreadId
+                  ? parentProjection(commands.length > 0 ? [task] : [])
+                  : childProjection,
+              ),
+            dispatch: (command) =>
+              Effect.sync(() => {
+                commands.push(command as never);
+                return {
+                  sequence: 1,
+                  storedEvents: [{ event: { type: "subagent.updated", payload: task } }],
+                } as never;
+              }),
+          }),
+          ServerSettings.layerTest({ defaultThreadEnvMode }),
+          providerRegistryLayer([
+            providerSnapshot({
+              instanceId: codexInstanceId,
+              driver: ProviderDriverKind.make("codex"),
+              model: "gpt-5.4",
+            }),
+          ]),
+          adapterRegistryLayer([codexInstanceId]),
+          Layer.mock(ProjectService.ProjectService)({
+            getById: () =>
+              Effect.succeedSome({ id: projectId, workspaceRoot: "/work/repo" } as never),
+            workspaceScanDirectory: Effect.succeed,
+          }),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+        const service = OrchestratorMcpService.layer.pipe(
+          Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+          Layer.provide(
+            Layer.mock(GitVcsDriver.GitVcsDriver)({
+              resolveCommit: (input) =>
+                git === "no commit"
+                  ? Effect.fail(
+                      new GitCommandError({
+                        operation: "resolveCommit",
+                        command: "git",
+                        cwd: input.cwd,
+                        detail: "unknown revision",
+                      }),
+                    )
+                  : Effect.succeed({ commitSha: "abc123" } as never),
+            }),
+          ),
+          Layer.provide(dependencies),
+        );
+        yield* Effect.gen(function* () {
+          const mcp = yield* OrchestratorMcpService.OrchestratorMcpService;
+          yield* mcp.delegateTask(scope, {
+            task: "Fix it.",
+            mode: "async",
+            ...(isolation === undefined ? {} : { isolation }),
+          });
+        }).pipe(Effect.provide(service));
+        assert.deepEqual(
+          commands[0]?.workspaceStrategy,
+          expected === "worktree"
+            ? { type: "worktree", baseRef: "abc123", startFromOrigin: false }
+            : undefined,
+        );
+      }),
+  );
+
   it.effect("rejects delegation to a provider without a registered adapter", () =>
     Effect.gen(function* () {
       const forkOnlyInstanceId = ProviderInstanceId.make("forkOnly");
