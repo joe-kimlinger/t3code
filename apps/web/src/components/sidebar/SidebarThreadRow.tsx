@@ -596,6 +596,8 @@ type SidebarThreadRowProps = {
   dragOverPinned: boolean;
   /** 0 for a top-level row. */
   nestingDepth?: number;
+  /** False when the row sits under a parent in the same project, which already names it. */
+  showProject?: boolean;
   nestedChildCount?: number;
   nestedChildrenCollapsed?: boolean;
   /** The most urgent state among nested threads a collapsed row hides. */
@@ -1049,6 +1051,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
   const sortable = props.sortable;
   const nestingDepth = props.nestingDepth ?? 0;
+  const showProject = props.showProject ?? nestingDepth === 0;
   const nestingIndent =
     nestingDepth > 0
       ? { paddingInlineStart: `${Math.min(nestingDepth, SIDEBAR_MAX_INDENT_DEPTH) * 0.875}rem` }
@@ -1450,7 +1453,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       "opacity-40 grayscale group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:grayscale-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
                   )}
                 >
-                  {props.project && nestingDepth === 0 ? (
+                  {props.project && showProject ? (
                     <ProjectFavicon project={props.project} className="size-4" />
                   ) : null}
                 </span>
@@ -1650,14 +1653,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {nestedToggle}
               {draftIndicator}
-              {/* A nested row shares its parent's project, so only top-level rows name it. */}
-              {props.project && nestingDepth === 0 ? (
+              {props.project && showProject ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />
               ) : null}
               {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
               {pinIndicator}
-              {props.projectDisplayName && nestingDepth === 0 ? (
+              {props.projectDisplayName && showProject ? (
                 <span
                   className={cn("min-w-0 flex-1 truncate font-normal text-secondary-label text-xs")}
                 >
