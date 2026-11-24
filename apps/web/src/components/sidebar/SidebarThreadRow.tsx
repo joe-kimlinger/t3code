@@ -1051,7 +1051,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const nestingDepth = props.nestingDepth ?? 0;
   const nestingIndent =
     nestingDepth > 0
-      ? { paddingInlineStart: `${Math.min(nestingDepth, SIDEBAR_MAX_INDENT_DEPTH) * 0.875}rem` }
+      ? { paddingInlineStart: `${Math.min(nestingDepth, SIDEBAR_MAX_INDENT_DEPTH) * 1.5}rem` }
       : undefined;
   // One guide per level, down the middle of each indent, so a parent's nested rows read as a run.
   const nestingGuides =
@@ -1062,7 +1062,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             aria-hidden
             data-testid="sidebar-nesting-guide"
             className="pointer-events-none absolute inset-y-0 w-px bg-muted-foreground/30"
-            style={{ insetInlineStart: `${level * 0.875 + 0.375}rem` }}
+            style={{ insetInlineStart: `${level * 1.5 + 0.75}rem` }}
           />
         ))
       : null;
