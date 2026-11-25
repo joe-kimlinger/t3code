@@ -15,21 +15,12 @@ import {
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
-import {
-  BlocksIcon,
-  FolderIcon,
-  MessagesSquareIcon,
-  PackageIcon,
-  SettingsIcon,
-  UserRoundIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { MessagesSquareIcon } from "lucide-react";
 import { msg, useGT, useMessages } from "gt-react";
 import { memo, useLayoutEffect, useRef, useState } from "react";
 
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import { cn } from "~/lib/utils";
-import { Badge } from "../ui/badge";
 import { Command, CommandGroup, CommandItem, CommandList } from "../ui/command";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
@@ -203,8 +194,6 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
   const m = useMessages();
   const skillSourceKind =
     props.item.type === "skill" ? resolveProviderSkillSourceKind(props.item.skill) : null;
-  const isSlashSkill =
-    props.triggerKind === "slash-command" && props.item.type === "skill" ? props.item.skill : null;
   const pullRequestPresentation =
     props.item.type === "pull-request" ? resolvePullRequestState(props.item.pullRequest, m) : null;
   const descriptionRef = useRef<HTMLSpanElement>(null);
@@ -270,14 +259,9 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       ) : null}
       <span className="flex min-w-0 flex-1 items-center gap-2">
         <span className="min-w-0 max-w-[45%] shrink-0 truncate font-sans text-xs font-medium">
-          {isSlashSkill ? (
-            <>
-              <span className="text-secondary-label">/skill:</span>
-              {formatProviderSkillDisplayName(isSlashSkill)}
-            </>
-          ) : (
-            props.item.label
-          )}
+          {props.item.type === "skill"
+            ? `${props.triggerKind === "slash-command" ? "/" : ""}${formatProviderSkillDisplayName(props.item.skill)}`
+            : props.item.label}
         </span>
         <Tooltip open={descriptionTruncated}>
           <TooltipTrigger
@@ -294,10 +278,9 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           <TooltipPopup>{props.item.description}</TooltipPopup>
         </Tooltip>
         {skillSourceKind ? (
-          <SkillSourceBadge
-            kind={skillSourceKind}
-            showSkillSuffix={props.triggerKind === "skill"}
-          />
+          <span className="shrink-0 text-secondary-label text-xs">
+            {m(SKILL_SOURCE_LABEL_BY_KIND[skillSourceKind])}
+          </span>
         ) : null}
       </span>
     </CommandItem>
@@ -316,53 +299,11 @@ const LISTBOX_LABEL_BY_TRIGGER: Record<ComposerTriggerKind, string> = {
   skill: msg("Skills"),
 };
 
-const SKILL_SOURCE_ICON_BY_KIND: Record<ProviderSkillSourceKind, LucideIcon> = {
-  app: BlocksIcon,
-  repo: FolderIcon,
-  project: FolderIcon,
-  personal: UserRoundIcon,
-  system: SettingsIcon,
-  other: PackageIcon,
+const SKILL_SOURCE_LABEL_BY_KIND: Record<ProviderSkillSourceKind, string> = {
+  app: msg("App", { $context: "skill source badge" }),
+  repo: msg("Repo", { $context: "skill source badge" }),
+  project: msg("Project", { $context: "skill source badge" }),
+  personal: msg("Personal", { $context: "skill source badge" }),
+  system: msg("System", { $context: "skill source badge" }),
+  other: msg("Provider", { $context: "skill source badge" }),
 };
-
-const SKILL_SOURCE_LABEL_BY_KIND: Record<
-  ProviderSkillSourceKind,
-  { readonly label: string; readonly skillLabel: string }
-> = {
-  app: {
-    label: msg("App", { $context: "skill source badge" }),
-    skillLabel: msg("App Skill"),
-  },
-  repo: {
-    label: msg("Repo", { $context: "skill source badge" }),
-    skillLabel: msg("Repo Skill"),
-  },
-  project: {
-    label: msg("Project", { $context: "skill source badge" }),
-    skillLabel: msg("Project Skill"),
-  },
-  personal: {
-    label: msg("Personal", { $context: "skill source badge" }),
-    skillLabel: msg("Personal Skill"),
-  },
-  system: {
-    label: msg("System", { $context: "skill source badge" }),
-    skillLabel: msg("System Skill"),
-  },
-  other: {
-    label: msg("Provider", { $context: "skill source badge" }),
-    skillLabel: msg("Provider Skill"),
-  },
-};
-
-function SkillSourceBadge(props: { kind: ProviderSkillSourceKind; showSkillSuffix: boolean }) {
-  const m = useMessages();
-  const Icon = SKILL_SOURCE_ICON_BY_KIND[props.kind];
-  const labels = SKILL_SOURCE_LABEL_BY_KIND[props.kind];
-  return (
-    <Badge className="ms-auto" variant="secondary">
-      <Icon aria-hidden="true" className="text-current" />
-      {m(props.showSkillSuffix ? labels.skillLabel : labels.label)}
-    </Badge>
-  );
-}

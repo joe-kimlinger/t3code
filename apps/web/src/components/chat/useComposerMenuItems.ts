@@ -343,7 +343,7 @@ export function useComposerMenuItems({
         type: "skill" as const,
         provider: selectedProvider,
         skill,
-        label: `/skill:${skill.name}`,
+        label: `/${skill.name}`,
         description:
           skill.shortDescription ??
           skill.description ??
