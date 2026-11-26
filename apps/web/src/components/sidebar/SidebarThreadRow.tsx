@@ -1155,6 +1155,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         number={pr?.number ?? currentLinkedPr?.number}
         url={pr?.url ?? currentLinkedPr?.url}
         status={prStatus}
+        iconOnly
         onOpenList={openLinkedItems}
         onOpenPullRequest={handlePrClick}
       />

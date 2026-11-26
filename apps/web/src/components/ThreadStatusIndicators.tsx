@@ -400,6 +400,7 @@ export function ThreadPullRequestBadgeControl({
   number,
   url,
   status,
+  iconOnly = false,
   onOpenList,
   onOpenPullRequest,
 }: {
@@ -409,17 +410,21 @@ export function ThreadPullRequestBadgeControl({
   number?: number | undefined;
   url?: string | undefined;
   status: PrStatusIndicator | null;
+  /** Hides the number of a single PR; stack and "+N" counts still show. */
+  iconOnly?: boolean;
   onOpenList: () => void;
   onOpenPullRequest: (event: MouseEvent<HTMLElement>, url?: string) => void;
 }) {
   const m = useMessages();
   const presentation = resolveThreadPullRequestBadgePresentation({ badge, number, url, status }, m);
   if (presentation === null) return null;
+  const opensList = badge !== null && (badge.kind === "stack" || badge.others > 0);
   return (
     <PullRequestBadge
       render={render}
       presentation={presentation}
-      opensList={badge !== null && (badge.kind === "stack" || badge.others > 0)}
+      showText={opensList || !iconOnly}
+      opensList={opensList}
       url={url}
       number={number}
       status={status}
@@ -433,6 +438,7 @@ export function ThreadPullRequestBadgeControl({
 function PullRequestBadge({
   render,
   presentation,
+  showText,
   opensList,
   url,
   number,
@@ -443,6 +449,7 @@ function PullRequestBadge({
 }: {
   render: ReactElement<{ render?: useRender.RenderProp }>;
   presentation: NonNullable<ReturnType<typeof resolveThreadPullRequestBadgePresentation>>;
+  showText: boolean;
   opensList: boolean;
   url: string | undefined;
   number: number | undefined;
@@ -479,7 +486,7 @@ function PullRequestBadge({
           className={cn("contents font-normal text-xs tabular-nums", presentation.toneClassName)}
         >
           <presentation.Icon aria-hidden className="size-3 shrink-0" />
-          <span className="text-secondary-label">{presentation.text}</span>
+          {showText ? <span className="text-secondary-label">{presentation.text}</span> : null}
         </span>
       </TooltipTrigger>
       <TooltipPopup
